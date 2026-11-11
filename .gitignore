@@ -1,0 +1,53 @@
+# =============================================================================
+# Secrets & state — NEVER commit these
+# =============================================================================
+# terraform.tfvars holds tenant/subscription IDs + proxycheck key.
+terraform/terraform.tfvars
+# State holds the app client secret in PLAINTEXT — keep it out of git.
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/tfplan
+terraform/crash.log
+terraform/.terraform/
+# local.settings.json holds the client secret for local dev.
+function/local.settings.json
+.env
+*.pem
+*.key
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# =============================================================================
+# Azure Functions
+# =============================================================================
+function/bin/
+function/obj/
+function/.python_packages/
+
+# =============================================================================
+# macOS / editors / local tooling
+# =============================================================================
+.DS_Store
+.vscode/
+.idea/
+*.swp
+# Local Claude Code / agent settings (machine-specific, not shared)
+.claude/settings.local.json
+
+# Note: terraform/.terraform.lock.hcl and *.example files ARE intentionally
+# committed — do not add them here.
+
+# Pester -CI output
+testResults.xml

@@ -1,0 +1,19 @@
+# M365 ATO Monitor
+
+> Free, self-hosted account takeover (ATO) and business email compromise (BEC) detection for Microsoft 365 Business Basic, Business Standard, and Office 365 tenants without Entra ID P1/P2, Defender for Office 365, or Sentinel. An Azure Function reads the unified audit log (Office 365 Management Activity API) every 2 minutes and sends email alerts through Microsoft Graph. One PowerShell script (install.ps1, PowerShell 7.2+ and the Azure CLI) installs, updates, verifies, and removes it in the user's own Azure subscription. It runs on the Azure Functions Flex Consumption plan with a managed identity: no client secret, no storage key.
+
+Reports: a starting-state report after the first run (inbox rules of every mailbox, past audit records), a weekly health report, a monthly report. Management UI: a page per user (alerts, revoke sessions, block sign-in, turn off inbox rules), mutes, settings (alert mailbox, recipients, detection, proxycheck.io key), history.
+
+Detects: malicious inbox rules, external mail forwarding, OAuth consent phishing, MFA method added, admin role assigned, mail flow (transport) rules, mailbox delegation, audit logging turned off, weakened mail protection, app secrets, domain federation, legacy-auth and device-code sign-ins, sign-ins from VPN/proxy/hosting IPs or new countries.
+
+## Docs
+
+- [README](README.md): what it detects and does not detect, comparison, computer setup (Windows, macOS, Linux, Azure Cloud Shell), quick start, costs, FAQ
+- [AGENTS.md](AGENTS.md): instructions for AI assistants: rules, install steps (dry run first), checks, common problems, how to add a detection
+- [Getting Started](docs/GETTING_STARTED.md): prerequisites, install.ps1, the dry run of each step, settings, troubleshooting, removal
+- [How-To](docs/HOW_TO.md): settings, allowlists, keywords, countries, mutes, response from the UI, automatic response, reports, recipients, Mail.Send restriction, update, uninstall
+- [Alert Triage](docs/TRIAGE.md): for each alert type: how to check it, what is normally benign, how to contain the account, when to escalate, rules for AI assistants
+- [Architecture](docs/ARCHITECTURE.md): pipeline, checkpoints, dedup, detectors, emails, Azure resources
+- [Security](docs/SECURITY.md): permissions, credentials and secrets, management UI controls, CI, limitations
+- [API Compatibility](docs/API_COMPATIBILITY.md): Microsoft and proxycheck.io APIs, audit record fields, platform lifecycle
+- [App Insights Queries](docs/APP_INSIGHTS_QUERIES.md): KQL for detections, errors, and runs

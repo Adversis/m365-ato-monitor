@@ -1,0 +1,30 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_TENANT_ID": "your-tenant-id",
+    "AZURE_CLIENT_ID": "your-client-id",
+    "AZURE_CLIENT_SECRET": "your-client-secret",
+    "ADMIN_EMAIL": "admin@yourdomain.com",
+    "PROXYCHECK_API_KEY": "",
+    "STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
+    "APP_INSIGHTS_APP_ID": "",
+    "ALLOWED_IPS": "",
+    "INTERNAL_DOMAINS": "",
+    "RISK_SCORE_THRESHOLD": "33",
+    "LOOKBACK_MINUTES": "8",
+    "LOGIN_ALERT_CONFIDENCE": "low",
+    "LOGIN_ALERT_MODE": "immediate",
+    "LOGIN_DIGEST_MINUTES": "60",
+    "RESOLVE_USER_IDS": "false",
+    "NO_CONTENT_ALERT_HOURS": "48",
+    "ATTACK_TOOL_USER_AGENTS": "AADInternals,ROADtools,GraphRunner,Gophish,Evilginx",
+    "AUTOMATION_USER_AGENTS": "python-requests,Python-urllib,Go-http-client,axios,node-fetch,curl,PowerShell",
+    "HIGH_RISK_OAUTH_SCOPES": "Mail.Read,Mail.ReadWrite,Mail.Send,Mail.Read.Shared,Mail.ReadWrite.Shared,Mail.Send.Shared,MailboxSettings.ReadWrite,EWS.AccessAsUser.All,full_access_as_app,Files.ReadWrite.All,Sites.ReadWrite.All,User.ReadWrite.All,Directory.ReadWrite.All,Application.ReadWrite.All,AppRoleAssignment.ReadWrite.All,RoleManagement.ReadWrite.Directory",
+    "GEO_ANOMALY_ENABLED": "true",
+    "HOME_COUNTRIES": "",
+    "ANOMALY_ACTION": "none",
+    "ANOMALY_ACTION_EXEMPT": ""
+  }
+}

@@ -1,0 +1,10 @@
+# Keep the build context small, and keep secrets out of it.
+.git
+**/__pycache__
+**/*.pyc
+**/.venv
+.pytest_cache
+function/local.settings.json
+function/.python_packages
+**/node_modules
+*.zip

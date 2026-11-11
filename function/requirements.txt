@@ -1,0 +1,8 @@
+# Azure Functions Python worker (v2 programming model)
+azure-functions>=1.18.0
+
+# Table Storage for event dedup + IP cache
+azure-data-tables>=12.4.0
+
+# HTTP client for O365 Management API, Microsoft Graph, and proxycheck.io
+requests>=2.31.0

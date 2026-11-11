@@ -1,0 +1,23 @@
+# Updates the pinned action SHAs in .github/workflows.
+# A new release must be 7 days old before Dependabot proposes it.
+# Python dependencies: the weekly CI run audits them (pip-audit).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The base image of the dev container (pinned by digest). The other pinned
+  # tools (PowerShell, Pester, Azure CLI) are ARGs in the Dockerfile.
+  - package-ecosystem: docker
+    directory: /.devcontainer
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

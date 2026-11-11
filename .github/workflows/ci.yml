@@ -1,0 +1,105 @@
+# Tests and static checks. The token is read-only. The workflow has no Azure
+# credentials and does not deploy.
+#
+# Actions are pinned to full commit SHAs. Dependabot updates them
+# (.github/dependabot.yml).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly run: finds new CVEs and breaking releases in the Python
+    # dependencies. The deploy installs the newest versions that
+    # function/requirements.txt allows.
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel an older run of the same pull request. Never cancel a run on main.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python:
+    name: Python tests and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12" # Same as the Function App runtime
+      - name: Install dependencies
+        run: python -m pip install -r function/requirements.txt -r tests/requirements-test.txt
+      - name: Lint (Python syntax, pyflakes, JavaScript syntax)
+        run: make lint-py
+      - name: Tests
+        run: python -m pytest tests -q
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: python -m pip install pip-audit==2.10.1
+      - name: Audit function/requirements.txt
+        run: pip-audit --requirement function/requirements.txt --progress-spinner off
+
+  powershell:
+    name: PowerShell (install.ps1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: PowerShell syntax
+        shell: pwsh
+        run: ./tests/Test-PowerShellSyntax.ps1
+      - name: install.ps1 tests (Pester, fake Azure CLI, no Azure access)
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.0 -MaximumVersion 5.99.99
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests/install.Tests.ps1'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+  workflows:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install zizmor
+        run: python -m pip install zizmor==1.31.1
+      - name: Audit .github
+        run: zizmor --offline --format=github .github

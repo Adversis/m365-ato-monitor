@@ -1,0 +1,53 @@
+# Builds the dev container (.devcontainer/Dockerfile) and runs "make check"
+# in it: Python tests, pyflakes, the JavaScript syntax check, the PowerShell
+# syntax check, and the Pester tests of install.ps1. It runs when the
+# container or its inputs change, and weekly, so that a pinned download that
+# disappears or changes (checksum) is found early. No secrets, no Azure.
+
+name: Dev container
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".devcontainer/**"
+      - ".dockerignore"
+      - "Makefile"
+      - "function/requirements.txt"
+      - "tests/requirements-test.txt"
+      - ".github/workflows/devcontainer.yml"
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+      - ".dockerignore"
+      - "Makefile"
+      - "function/requirements.txt"
+      - "tests/requirements-test.txt"
+      - ".github/workflows/devcontainer.yml"
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Dev container (build and make check)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image
+        run: docker build -f .devcontainer/Dockerfile -t m365-ato-monitor-dev .
+      - name: Tool versions
+        run: docker run --rm m365-ato-monitor-dev bash -c 'python --version; pwsh --version; az version --query "\"azure-cli\"" --output tsv; node --version'
+      - name: make check in the container (as the runner user, like make docker-check)
+        run: docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/workspace -w /workspace m365-ato-monitor-dev make check

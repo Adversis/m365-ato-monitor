@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<meta name="color-scheme" content="light dark">
+<title>M365 ATO Monitor</title>
+<link rel="stylesheet" href="/api/manage/app.css">
+<script src="/api/manage/app.js" defer></script>
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <span class="brand-name">M365 ATO Monitor</span>
+        <span class="brand-site" id="site"></span>
+      </div>
+    </div>
+    <div class="who">
+      <button type="button" class="who-user" id="profile-button" aria-haspopup="dialog" aria-expanded="false"
+              aria-controls="profile-menu" title="Your account">
+        <span class="avatar" id="avatar" aria-hidden="true"></span><span id="user"></span>
+      </button>
+      <a href="/.auth/logout?post_logout_redirect_uri=/api/manage">Sign out</a>
+      <div class="profile-menu" id="profile-menu" role="dialog" aria-labelledby="profile-title" hidden>
+        <h2 class="profile-title" id="profile-title" tabindex="-1">Signed in as</h2>
+        <dl class="profile-facts">
+          <dt>Name</dt><dd id="profile-name"></dd>
+          <dt>Email</dt><dd id="profile-email"></dd>
+          <dt>Access</dt><dd id="profile-access"></dd>
+        </dl>
+        <a class="btn" href="/.auth/logout?post_logout_redirect_uri=/api/manage">Sign out</a>
+      </div>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" id="tab-overview" aria-controls="view-overview" data-view="overview">Overview</button>
+    <button type="button" role="tab" id="tab-alerts" aria-controls="view-alerts" data-view="alerts">Alerts</button>
+    <button type="button" role="tab" id="tab-users" aria-controls="view-users" data-view="users">Users</button>
+    <button type="button" role="tab" id="tab-mutes" aria-controls="view-mutes" data-view="mutes">Mutes</button>
+    <button type="button" role="tab" id="tab-settings" aria-controls="view-settings" data-view="settings">Settings</button>
+    <button type="button" role="tab" id="tab-countries" aria-controls="view-countries" data-view="countries">Countries</button>
+    <button type="button" role="tab" id="tab-history" aria-controls="view-history" data-view="history">History</button>
+  </nav>
+</header>
+
+<main class="content" id="main">
+  <div id="banner" class="banner" hidden></div>
+  <p id="loading" class="muted">Loading…</p>
+  <section id="view-overview" role="tabpanel" aria-labelledby="tab-overview" hidden></section>
+  <section id="view-alerts" role="tabpanel" aria-labelledby="tab-alerts" hidden></section>
+  <section id="view-users" role="tabpanel" aria-labelledby="tab-users" hidden></section>
+  <section id="view-mutes" role="tabpanel" aria-labelledby="tab-mutes" hidden></section>
+  <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden></section>
+  <section id="view-countries" role="tabpanel" aria-labelledby="tab-countries" hidden></section>
+  <section id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden></section>
+</main>
+
+<div id="savebar" class="savebar" role="region" aria-label="Unsaved changes" hidden>
+  <div class="savebar-inner">
+    <span class="savebar-text"><span class="dot" aria-hidden="true"></span><span id="savebar-text"></span></span>
+    <span class="savebar-actions">
+      <button type="button" class="btn" id="discard">Discard</button>
+      <button type="button" class="btn btn-primary" id="save">Save changes</button>
+    </span>
+  </div>
+</div>
+
+<dialog id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <div class="dialog-body">
+    <div class="dialog-head" id="confirm-head">
+      <h2 id="confirm-title">Confirm changes</h2>
+    </div>
+    <div id="confirm-body"></div>
+  </div>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="confirm-cancel">Cancel</button>
+    <button type="button" class="btn btn-danger" id="confirm-ok">Save anyway</button>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# LF line endings in every checkout, also on Windows. The dev container (Linux)
+# runs make, bash, and Python on this folder; CRLF breaks the Makefile.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
