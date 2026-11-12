@@ -156,9 +156,9 @@ Real records show the same GUID in all three. A replayed cookie writes new sign-
 
 Each run:
 
-1. Collects the records that have a session ID, a user, and a public IP that is not allowed (failed sign-ins are skipped).
+1. Collects the records that have a session ID, a user, and a public IP that is not allowed. Failed sign-ins are skipped. Exchange Graph REST records are skipped when the record has both `Client=REST` and the Graph resource ID in `AppId` or `AppAccessContext.APIId`: those IPs belong to the service, not the client.
 2. Reads each session from the table `signinsessions` (one row per session: user, IPs with their countries, risky IPs, countries with first and last time, alerts already sent).
-3. Looks up the IPs that are new for the session (cache first, then proxycheck.io). An IP on a Microsoft network (AS8075 and related) is marked and ignored. A VPN, proxy, hosting, or Tor IP (the same test as the suspicious sign-in check) is marked as risky.
+3. Looks up the IPs that are new for the session (cache first, then proxycheck.io). Microsoft-owned networks are checked too: Azure hosts customer VMs. A VPN, proxy, hosting, or Tor IP (the same test as the suspicious sign-in check) is marked as risky. IPs that an earlier version excluded by network ownership are checked again.
 4. A country that is new for a session that already has another country is a finding (`session_reuse`): high, or medium if the country is a home country or usual for the user.
 5. A risky IP that is new for a session in the same country is a finding (`session_reuse`) if: the session already has a normal IP, the record is not a sign-in, and the IP did not sign in as the user in the last 7 days. Medium, or high for a Tor, SOCKS, or compromised-server IP. One finding per session. A sign-in from a risky IP gets a suspicious sign-in alert. Mail reads and sends are left to the mail access check while it is on.
 6. The alert goes out like a compromise indicator. After it is sent, the country (or the risky-IP finding) is marked as alerted for the session.
@@ -173,7 +173,7 @@ Rows older than 30 days are deleted by the weekly cleanup. Microsoft's AiTM hunt
 2. Keeps each user and IP of a successful sign-in (`signinip`, 7 days).
 3. Groups the mail access records by user and IP. Only clients that show the user's own IP count (`Client=OWA`, `MSExchangeRPC`, `OutlookService`, `ActiveSync`, `WebServices`, `IMAP4`, `POP3`). Graph records (`Client=REST`) carry a Microsoft IP and are skipped.
 4. Skips private and allowlisted IPs, IPs that signed in as the user in 7 days, and user, IP, and day combinations that already have a high finding.
-5. Looks up the rest (at most `MAIL_ACCESS_MAX_LOOKUPS` per run; the IP cache and iCloud Private Relay list apply). Microsoft networks are skipped.
+5. Looks up the rest (at most `MAIL_ACCESS_MAX_LOOKUPS` per run; the IP cache and iCloud Private Relay list apply). Microsoft-owned networks are checked too.
 6. A VPN, proxy, hosting, or Tor IP, or a new country for the user, is a finding (`mail_access`). High: Tor or a similar anonymizer, or mail sent or a folder downloaded from a flagged IP. Else medium.
 
 Each user, IP, and day can have one medium finding and one later high finding. A medium finding that was muted does not suppress the high finding. After a high finding, neither severity sends another alert for that day.
@@ -191,7 +191,7 @@ Two kinds of finding are journaled without an email:
 
 | Detector (finding type) | Operations | Alert condition |
 |---|---|---|
-| Inbox rules (`inbox_rule`) | `New-InboxRule`, `Set-InboxRule`, `Enable-InboxRule`, `UpdateInboxRules` | High: external forward or redirect (all fields, all recipients), delete, move to a hidden folder. Medium: a name with no letters or digits; a 1–2 character name with mark-as-read, move, or delete; a word in `INBOX_RULE_KEYWORDS` with mark-as-read, move, or delete |
+| Inbox rules (`inbox_rule`) | `New-InboxRule`, `Set-InboxRule`, `Enable-InboxRule`, `UpdateInboxRules` | High: external forward or redirect (all fields, all recipients), delete, move to a hidden folder. Medium: an unverified X.500 forwarding recipient in a cmdlet record; a name with no letters or digits; a 1–2 character name with mark-as-read, move, or delete; a word in `INBOX_RULE_KEYWORDS` with mark-as-read, move, or delete |
 | Mailbox forwarding (`mailbox_forwarding`) | `Set-Mailbox` | `ForwardingSmtpAddress` external (high), or `ForwardingAddress` set (medium; high if external) |
 | OAuth consents (`oauth_consent`) | `Consent to application.`, `Add delegated permission grant.`, `Add app role assignment to service principal.` | A scope in `HIGH_RISK_OAUTH_SCOPES` |
 | User agents (`attack_tool`, `suspicious_user_agent`) | Records with `ExtendedProperties.UserAgent` | Attack tool (high), automation library (medium). A failed sign-in (wrong password) is only logged (status "alert off"), unless `LOGIN_ALERT_FAILED` is on |
@@ -239,6 +239,8 @@ What the monitor does not detect:
 - SharePoint, OneDrive, and Teams activity.
 
 The tool detects attacker actions after access. It does not prevent an attack. An optional automatic response (off by default) revokes sessions or blocks sign-in after a high account-takeover alert or a new-country sign-in, and turns off a malicious inbox rule. It never changes a password.
+
+The responder rejects failed sign-ins that do not prove the password, independently of `LOGIN_ALERT_FAILED`. That setting controls email only. Successful sign-ins and correct passwords stopped by MFA or Conditional Access remain eligible for the configured response.
 
 ## Emails
 

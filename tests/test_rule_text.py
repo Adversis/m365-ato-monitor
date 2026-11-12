@@ -1,4 +1,4 @@
-"""Inbox rule alerts say what the rule does; X.500 recipients are directory recipients, not external."""
+"""Inbox rule text and verification alerts for unresolved X.500 recipients."""
 
 import compromise_detector as cd
 import mailbox_rules
@@ -26,10 +26,11 @@ class TestDirectoryRecipients:
         assert cd.short_address("bob@contoso.com") == "bob@contoso.com"
         assert cd.is_directory_address(JANE) and not cd.is_directory_address("Jane Smith")
 
-    def test_redirect_to_colleagues_is_not_external(self):
+    def test_directory_recipients_need_verification(self):
         rule = _rule("Northwind Supply, Inc.", {"redirectTo": _to(JANE, SAM)},
                      {"fromAddresses": _to("orders@supplier.example")})
-        assert mailbox_rules.assess(rule, "jane@contoso.com") == ("", [])
+        severity, reasons = mailbox_rules.assess(rule, "jane@contoso.com")
+        assert severity == "medium" and "unverified directory recipients" in reasons[0]
         s = mailbox_rules.summarize(rule, "jane@contoso.com")
         assert s["actions"] == "redirect to jane (directory), sam (directory)"
         assert s["conditions"] == "from orders@supplier.example"
@@ -37,11 +38,12 @@ class TestDirectoryRecipients:
     def test_external_smtp_still_high(self):
         rule = _rule("x", {"redirectTo": _to(JANE, "drop@evil.com")})
         severity, reasons = mailbox_rules.assess(rule, "jane@contoso.com")
-        assert severity == "high" and reasons == ["redirects externally to drop@evil.com"]
+        assert severity == "high" and "redirects externally to drop@evil.com" in reasons
 
     def test_audit_record_with_x500_target(self):
         params = {"Name": "Northwind", "RedirectTo": f"{JANE};{SAM}"}
-        assert cd._cmdlet_rule_indicators(params, "contoso.com") == []
+        assert cd._cmdlet_rule_indicators(params, "contoso.com") == []  # no proof of an external destination
+        assert "unverified directory recipients" in cd._directory_rule_indicators(params)[0]
         assert cd._cmdlet_rule_indicators({"RedirectTo": "Jane Smith"}, "contoso.com")   # a name: cannot tell
 
 

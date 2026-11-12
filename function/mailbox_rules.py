@@ -109,10 +109,15 @@ def assess(rule: dict, mailbox: str, folder: str = "") -> tuple:
 
     for key, verb in (("forwardTo", "forwards"), ("forwardAsAttachmentTo", "forwards as attachment"),
                       ("redirectTo", "redirects")):
-        external = [a for a in _addresses(actions, key)
+        addresses = _addresses(actions, key)
+        external = [a for a in addresses
                     if not is_directory_address(a) and not _is_internal(_user_domain(a), domain)]
         if external:
             strong.append(f"{verb} externally to {'; '.join(external)}")
+        directory = [short_address(a) for a in addresses if is_directory_address(a)]
+        if directory:
+            weak.append(f"{verb} to unverified directory recipients: {'; '.join(directory)} "
+                        "(the final addresses can be external; check the rule)")
     if actions.get("delete") or actions.get("permanentDelete"):
         strong.append("deletes matching messages")
     if folder and folder.strip().lower() in HIDDEN_FOLDERS:

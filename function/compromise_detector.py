@@ -162,17 +162,13 @@ def _external_targets(value, user_domain: str) -> list:
     "a@contoso.com;b@evil.com" or '"Bob" [SMTP:bob@evil.com]'. Each SMTP
     address is checked. A value with no SMTP address (for example a display
     name or an X.500 address) is returned as-is: the app cannot prove that it
-    is internal, so it alerts.
+    is internal. Inbox rules report directory references as unverified.
     """
     text = str(value or "").strip()
     if not text:
         return []
     addresses = [(m.group(0), m.group(1).lower().rstrip(".")) for m in _EMAIL_RE.finditer(text)]
     if not addresses:
-        # X.500 addresses only: recipients in the directory (a contact there can point outside,
-        # but only an admin makes contacts). Any other text, for example a display name, alerts.
-        if all(is_directory_address(part) for part in re.split(r"[;,]", text) if part.strip()):
-            return []
         return [text[:200]]
     return [addr for addr, domain in addresses if not _is_internal(domain, user_domain)]
 
@@ -309,6 +305,7 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
     user = _user(event)
     user_domain = _user_domain(user)
     mailbox = _rule_mailbox(event, params, operation) or user
+    confirm_first = False
 
     if operation == "UpdateInboxRules":
         name = str(params.get("RuleName") or params.get("Name") or "")
@@ -322,7 +319,9 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
         ident = str(params.get("Identity") or event.get("ObjectId") or "")
         name = str(params.get("Name") or re.split(r"[\\/]", ident)[-1])
         strong = _cmdlet_rule_indicators(params, user_domain)
-        weak = _rule_keyword_indicators(params)
+        directory = _directory_rule_indicators(params)
+        weak = _rule_keyword_indicators(params) + directory
+        confirm_first = bool(directory) and not strong
         hides = (_is_true(params.get("MarkAsRead")) or bool(str(params.get("MoveToFolder") or "").strip())
                  or _is_true(params.get("DeleteMessage")) or _is_true(params.get("SoftDeleteMessage")))
 
@@ -360,6 +359,7 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
         "mailbox": mailbox,
         "target": mailbox,
         "targets": targets,
+        "confirm_first": confirm_first,
     }
 
 
@@ -430,13 +430,28 @@ def _rule_keyword_indicators(params: dict) -> list:
     return [f"matches mail that contains {quoted} and {_join(actions)}"]
 
 
+def _directory_rule_indicators(params: dict) -> list:
+    """Directory recipients can be external mail contacts. Ask for verification."""
+    indicators = []
+    for field, verb in (("ForwardTo", "forwards"), ("ForwardAsAttachmentTo", "forwards as attachment"),
+                        ("RedirectTo", "redirects")):
+        recipients = [short_address(part) for part in re.split(r"[;,]", str(params.get(field) or ""))
+                      if is_directory_address(part)]
+        if recipients:
+            indicators.append(f"{verb} to unverified directory recipients: {'; '.join(recipients)} "
+                              "(the final addresses can be external; check the rule)")
+    return indicators
+
+
 def _cmdlet_rule_indicators(params: dict, user_domain: str) -> list:
     """Indicators for New-InboxRule, Set-InboxRule, and Enable-InboxRule parameters."""
     indicators = []
     for field, verb in (("ForwardTo", "forwards"),
                         ("ForwardAsAttachmentTo", "forwards as attachment"),
                         ("RedirectTo", "redirects")):
-        targets = _external_targets(params.get(field), user_domain)
+        # Directory references get a medium verification finding above, not
+        # an assertion that the recipient is external and a high response.
+        targets = [t for t in _external_targets(params.get(field), user_domain) if not is_directory_address(t)]
         if targets:
             indicators.append(f"{verb} externally to {'; '.join(targets)}")
 

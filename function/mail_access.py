@@ -58,6 +58,7 @@ _SIGNIN_PARTITION = "signinip"
 # ClientInfoString prefixes of clients whose records carry the user's own IP.
 REAL_IP_CLIENTS = ("client=owa", "client=msexchangerpc", "client=outlookservice", "client=activesync",
                    "client=webservices", "client=imap4", "client=pop3")
+_GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 MAX_SUBJECTS = 3
 
 
@@ -267,6 +268,25 @@ def real_ip_client(record: dict) -> bool:
     return info.startswith(REAL_IP_CLIENTS)
 
 
+def service_ip_client(record: dict) -> bool:
+    """An Exchange Graph REST record whose IP belongs to the service, not the client.
+
+    Network ownership alone cannot establish this: Azure hosts customer VMs.
+    Require both the REST client marker and the Graph resource ID. Sign-in
+    records always show the sign-in source and must not be excluded here.
+    """
+    operation = record.get("Operation")
+    if operation in ("UserLoggedIn", "UserLoginFailed"):
+        return False
+    if record.get("Workload") != "Exchange" and operation not in (READ, SEND):
+        return False
+    client = str(record.get("ClientInfoString") or "").split(";")[0].strip().lower()
+    ctx = record.get("AppAccessContext")
+    api_id = ctx.get("APIId") if isinstance(ctx, dict) else ""
+    resources = {str(v or "").lower() for v in (record.get("AppId"), api_id)}
+    return client == "client=rest" and _GRAPH_API_ID in resources
+
+
 def observations(records: list) -> dict:
     """Mail access records grouped by (user, IP): counts, first and last time, sent subjects."""
     groups = {}
@@ -349,7 +369,6 @@ def check(records: list, lookup: Callable[[list], dict], analyze: Callable[[dict
           unusual: Callable[[str, str], bool] = lambda u, cc: False,
           done: Callable[[str], bool] = lambda key: False,
           skip_ip: Callable[[str], bool] = lambda ip: False,
-          is_microsoft: Callable[[dict], bool] = lambda data: False,
           country_of: Callable[[dict], str] = lambda data: str(data.get("isocode") or ""),
           cached: Callable[[list], dict] = lambda ips: {},
           max_lookups: int = 25) -> list:
@@ -389,7 +408,7 @@ def check(records: list, lookup: Callable[[list], dict], analyze: Callable[[dict
     findings = []
     for g in candidates:
         data = results.get(g["ip"])
-        if not data or is_microsoft(data):
+        if not data:
             continue
         analysis = analyze(data)
         cc = country_of(data)

@@ -38,6 +38,7 @@ from urllib.parse import quote
 from azure.core.exceptions import ResourceNotFoundError
 
 import config
+from geo_monitor import sign_in_outcome
 from o365_client import token_manager
 
 _GRAPH = "https://graph.microsoft.com/v1.0"
@@ -251,6 +252,11 @@ def response_target(finding: dict) -> tuple:
     """
     ftype = finding.get("type")
     if ftype in SIGNIN_TYPES:
+        event = finding.get("event") or {}
+        # A failed-login user name and user agent are attacker-controlled.
+        # LOGIN_ALERT_FAILED enables email, never proof of account compromise.
+        if event.get("Operation") == "UserLoginFailed" and sign_in_outcome(event) == "failed":
+            return "", "the sign-in did not prove the password"
         upn = str(finding.get("user") or "").strip()
         return (upn, "") if _ADDRESS_RE.match(upn) else ("", "no account address in the record")
     upn, why = affected_account(finding)

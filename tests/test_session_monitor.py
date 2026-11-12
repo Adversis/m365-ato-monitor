@@ -128,11 +128,12 @@ class TestCheck:
     def test_same_country_new_ip_ignored(self):
         assert sm.check(FakeTable(), [signin(HOME_IP, 1), signin(HOME_IP2, 2)], Lookup(), NOW) == []
 
-    def test_microsoft_ip_ignored(self):
+    def test_microsoft_ip_does_not_establish_service_activity(self):
         table = FakeTable()
-        assert sm.check(table, [signin(HOME_IP, 1), mail_access(MS_IP, 2)], Lookup(), NOW) == []
+        findings = sm.check(table, [signin(HOME_IP, 1), mail_access(MS_IP, 2)], Lookup(), NOW)
+        assert len(findings) == 1 and findings[0]["country"] == "IE"
         row = table.get_entity("session", SID)
-        assert '"MS"' in row["ips"]
+        assert '"MS"' not in row["ips"] and '"IE"' in row["ips"]
 
     def test_failed_lookup_retried(self):
         table = FakeTable()
@@ -194,7 +195,9 @@ class TestRiskyNetworkSameCountry:
 
     def test_session_that_started_on_a_vpn(self):
         assert self._check([mailbox(VPN_IP, 1), mailbox(VPN_IP2, 5)]) == []
-        assert self._check([signin(MS_IP, 1), mailbox(VPN_IP, 5)]) == []
+        record = mail_access(MS_IP, 1)
+        record.update(ClientInfoString="Client=REST;Client=RESTSystem", AppId="00000003-0000-0000-c000-000000000000")
+        assert self._check([record, mailbox(VPN_IP, 5)]) == []  # a service IP does not seed the session
 
     def test_once_per_session(self):
         table = FakeTable()

@@ -106,12 +106,11 @@ class TestCheck:
         found, _ = _check([owa_read()], {"81.2.69.160": ABROAD}, unusual=lambda u, cc: cc == "NG")
         assert found[0]["severity"] == "medium" and "new country for this user (MTN)" in found[0]["description"]
 
-    def test_done_allowlisted_microsoft_and_failed_lookup(self):
+    def test_done_allowlisted_and_failed_lookup(self):
         rec = owa_read()
         key = f"mail_access_{mail_access.dedup_id(USER, '81.2.69.160', '2026-11-09')}"
         assert _check([rec], {"81.2.69.160": VPN}, done=lambda k: k == key)[0] == []
         assert _check([rec], {"81.2.69.160": VPN}, skip_ip=lambda ip: True)[1] == []
-        assert _check([rec], {"81.2.69.160": VPN}, is_microsoft=lambda d: True)[0] == []
         assert _check([rec], {})[0] == []                                 # lookup failed: next run tries again
 
     def test_lookup_cap(self):

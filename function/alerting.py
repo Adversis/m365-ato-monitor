@@ -526,7 +526,8 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
     parts.append(_user_button(event, raw_user))
     first = ("If no one on your team made this change, treat the account that made it as "
              "compromised: revoke its sessions and reset its password."
-             if ftype in _CONFIRM_FIRST else "Revoke the user's sessions and reset the password.")
+             if ftype in _CONFIRM_FIRST or finding.get("confirm_first")
+             else "Revoke the user's sessions and reset the password.")
     parts.append(_steps([first]
                         + _COMPROMISE_STEPS.get(ftype, ["Look for other attacker activity on the account."])))
     if not is_test:

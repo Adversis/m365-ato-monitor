@@ -388,7 +388,7 @@ A stolen session cookie (AiTM phishing) or token (infostealer) keeps the session
 - A session appears in a second country. High, or medium if the new country is a home country or a usual country for the user.
 - A session that started on a normal network is used in the same country from a VPN, proxy, hosting, or Tor IP that did not sign in as the user. This is a token used without a new sign-in. Medium, or high for Tor. One alert per session.
 
-Microsoft service IPs (network AS8075 and related) and allowed IPs do not count. Each new IP in a session uses one proxycheck.io query (a clean answer is cached for 7 days, a flagged one for 24 hours).
+Allowed IPs do not count. Microsoft-owned networks are checked because Azure hosts customer VMs. Exchange Graph REST records are excluded only when the record identifies both the REST client and the Graph resource: those IPs belong to the service, not the client. Each new IP in a session uses one proxycheck.io query (a clean answer is cached for 7 days, a flagged one for 24 hours).
 
 To turn it off: Management UI > Settings > New sign-in countries > **Alert when a session moves to another country or a risky IP**.
 

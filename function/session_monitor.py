@@ -24,8 +24,9 @@ of record and reports:
 Not detected: records without a session ID (about half of workload records,
 for example Outlook desktop and some API access), and an attacker on a
 normal network in the same country (AiTM kits often use a residential proxy
-in the victim's country). Microsoft service IPs (AS8075 and related) appear
-in normal sessions and are ignored. Allowlisted IPs are ignored.
+in the victim's country). Exchange Graph REST records show a service IP and
+are ignored when the record identifies that API and client. Microsoft-owned
+networks also host customer VMs and are checked. Allowlisted IPs are ignored.
 
 Microsoft's AiTM hunting guidance uses the same join (SessionId, different
 country).
@@ -41,6 +42,7 @@ from azure.core.exceptions import ResourceNotFoundError
 
 import config
 import geo_monitor
+from mail_access import service_ip_client
 from ip_checker import extract_ip, is_allowed_ip, is_private_ip
 
 TABLE_NAME = "signinsessions"
@@ -57,9 +59,6 @@ _EVENT_FIELDS = ("Id", "CreationTime", "Operation", "UserId", "ClientIP", "Clien
 RETENTION_DAYS = 30
 MAX_IPS = 25
 NETWORK_MARK = "risky-network"  # in "alerted": the session already had a same-country risky-IP finding
-# Microsoft networks. Microsoft services act inside a user's session from these.
-MICROSOFT_ASNS = {"AS8075", "AS8068", "AS8069", "AS8070", "AS8071", "AS8072", "AS8073",
-                  "AS8074", "AS12076", "AS3598"}
 _GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 _cache = config.CachedTable(TABLE_NAME, "Session table")
@@ -105,7 +104,8 @@ def observations(records: list) -> list:
     """
     out = []
     for record in records:
-        if not isinstance(record, dict) or record.get("Operation") == "UserLoginFailed":
+        if (not isinstance(record, dict) or record.get("Operation") == "UserLoginFailed"
+                or service_ip_client(record)):
             continue
         sid = session_id(record)
         user = _user(record)
@@ -122,9 +122,14 @@ def _load(table, sid: str) -> dict:
         entity = table.get_entity(PARTITION, sid)
     except ResourceNotFoundError:
         return {}
+    ips = json.loads(entity.get("ips") or "{}")
+    if int(entity.get("ip_schema") or 1) < 2:
+        # Version 1 used "MS" as a network exemption. Version 2 stores only
+        # country codes (including MS, the ISO code for Montserrat).
+        ips = {ip: cc for ip, cc in ips.items() if cc != "MS"}
     return {
         "user": entity.get("user", ""),
-        "ips": json.loads(entity.get("ips") or "{}"),
+        "ips": ips,
         "countries": json.loads(entity.get("countries") or "{}"),
         "alerted": json.loads(entity.get("alerted") or "[]"),
         "risky": json.loads(entity.get("risky") or "[]"),
@@ -139,17 +144,12 @@ def _save(table, sid: str, row: dict, now: datetime) -> None:
     risky = [ip for ip in row.get("risky", []) if ip in ips]
     table.upsert_entity({
         "PartitionKey": PARTITION, "RowKey": sid, "user": row["user"],
+        "ip_schema": 2,
         "ips": json.dumps(ips), "countries": json.dumps(row["countries"]),
         "alerted": json.dumps(row["alerted"]), "risky": json.dumps(risky),
         "first_seen": row.get("first_seen") or now.isoformat(),
         "last_seen": now.isoformat(),
     })
-
-
-def _is_microsoft(data: dict) -> bool:
-    asn = str(data.get("asn") or "").upper()
-    names = f"{data.get('provider') or ''} {data.get('organisation') or ''}".lower()
-    return asn in MICROSOFT_ASNS or "microsoft" in names
 
 
 def _usual(geo_table, user: str, cc: str, now: datetime) -> bool:
@@ -203,20 +203,17 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
             data = results.get(ip)
             if not data:
                 continue  # lookup failed; the record comes back in the next window
-            cc = "MS" if _is_microsoft(data) else geo_monitor.country_of(data)
+            cc = geo_monitor.country_of(data)
             if not cc:
                 continue
             normal = _normal_ip(row)
             row["ips"][ip] = cc
             changed.add(sid)
-            analysis = analyze(data) if analyze and cc != "MS" else {}
+            analysis = analyze(data) if analyze else {}
             if analysis.get("is_suspicious"):
                 row["risky"].append(ip)
                 if normal:
                     moved = (normal, analysis)
-        if cc == "MS":
-            continue
-
         countries = row["countries"]
         if cc in countries:
             if when > countries[cc]["last"]:
@@ -326,9 +323,9 @@ def _delete_pending(table, key: str) -> None:
 
 
 def _normal_ip(row: dict) -> str:
-    """The latest IP of the session that is not a Microsoft or risky IP, or ""."""
-    for ip, cc in reversed(list(row["ips"].items())):
-        if cc != "MS" and ip not in row["risky"]:
+    """The latest IP of the session that is not risky, or ""."""
+    for ip in reversed(row["ips"]):
+        if ip not in row["risky"]:
             return ip
     return ""
 

@@ -336,7 +336,7 @@ Subject: `[M365 Alert] HIGH: Inbox rule - <user>` (or MEDIUM). Email title: "Sus
 - `ClientInfoString`: `Client=OWA` is Outlook on the web. `Client=MSExchangeRPC` is Outlook desktop. `Client=WebServices;<user agent>` is EWS (a script or an app).
 - Compare: a name such as `.`, `..`, or one letter; a forward to a free mail service; a condition on words such as invoice, payment, or password; the IP against the user's sign-ins; the time against other alerts for the user.
 - If `UserId` is not the mailbox owner, an admin or a delegate made the rule.
-- A recipient shown as "name (directory)" is an X.500 address: a mailbox, group, or contact in your directory. Outlook writes it when the person picks the recipient from the address book. The monitor does not count it as external. A contact in the directory can point to an outside address: check it in the Microsoft 365 admin center > Contacts if the name is not a colleague.
+- A recipient shown as "name (directory)" is an X.500 address: a mailbox, group, or contact in your directory. Outlook writes it when the person picks the recipient from the address book. The monitor flags it as unverified because it cannot resolve the final address. A contact can point outside your organization. Check it in Microsoft 365 admin center > Contacts. Confirm the destination and the rule with the user before you take action.
 - The alert lists what the rule does (Actions) and for which mail (Conditions). For a rule that the onboarding scan found, the email has no audit record: open the rule on the user page (Management UI > Users > the user > Inbox rules).
 - Look next: `Get-InboxRule -Mailbox <upn> -IncludeHidden`. Microsoft Purview > Audit: the user's `UserLoggedIn` records in the hours before the rule.
 

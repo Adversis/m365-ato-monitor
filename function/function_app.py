@@ -947,7 +947,7 @@ def _run_mail_access_check(events_table, ip_cache_table, processed_keys: set, ex
         unusual=lambda user, cc: geo_monitor.is_unusual(geo_table, user, cc, now),
         done=lambda key: key in processed_keys or _was_processed(events_table, key),
         skip_ip=lambda ip: is_private_ip(ip) or is_allowed_ip(ip),
-        is_microsoft=session_monitor._is_microsoft, country_of=geo_monitor.country_of,
+        country_of=geo_monitor.country_of,
         cached=lambda ips: check_ips_batch(ips, ip_cache_table, cache_only=True),
         max_lookups=config.MAIL_ACCESS_MAX_LOOKUPS)
     failed = False

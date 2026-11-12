@@ -192,6 +192,8 @@ The monitor can revoke a user's sessions, block sign-in, or turn off an inbox ru
 
 The response never changes passwords. It does not act on alerts about admin changes or app consents, and Microsoft Graph refuses changes to admin accounts. It acts only on the account that signed in, or on an account that changed its own mailbox or MFA. A change that one account made to another account gets no action, because either account can be the compromised one. The same actions are also buttons on each user's page in the management UI. Details: [How-To: Respond automatically](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).
 
+A wrong-password sign-in never triggers an account action, even if **Email failed sign-ins** is on. A high sign-in alert can trigger an action after a successful sign-in or a correct password stopped by MFA or Conditional Access.
+
 ## Management UI
 
 The install prints the address:
@@ -216,7 +218,7 @@ Sign-in uses Entra ID. The person who runs the install can open the page. To giv
 
 | Detection | Examples | Severity |
 | --- | --- | --- |
-| Inbox rules | Forward to an external address; delete mail or move it to a folder that users seldom open; a rule named `..` | High or medium |
+| Inbox rules | Forward to an external address; forward to an unverified directory recipient (medium); delete mail or move it to a folder that users seldom open; a rule named `..` | High or medium |
 | Mailbox forwarding | Forwarding to an external address (high) or an internal address (medium) | High or medium |
 | Mail flow (transport) rules | External BCC or redirect; skip spam filtering | High or medium |
 | OAuth consent | An app gets mailbox, file, or directory access, such as `Mail.Read` or `full_access_as_app` | High |
