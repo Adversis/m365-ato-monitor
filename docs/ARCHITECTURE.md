@@ -95,6 +95,8 @@ A mute (`admin_store`, partition `mutes`) has an alert type (or all types that c
 3. Search: the Graph audit log search (`audit_search.py`) from 180 days back to the start of step 1, for the operations that the detectors read (`compromise_detector.history_operations()`, no sign-ins). The scan submits the search when it starts, because Microsoft takes minutes to hours. This step waits for the status `succeeded` (at most 48 hours), then reads the records 500 per page and runs the detectors on them, as in step 1. Without `AuditLogsQuery.Read.All`, the step is skipped and the report says why.
 4. Report: one email. The journal rows of the scan carry its run ID; the report selects them by run ID, at any event time. The state then becomes `done`.
 
+A failed or incomplete history fetch keeps the cursor at the start of that window. The next run retries it. Records are counted only after both content types are complete.
+
 A new start writes a new run ID. A step that finds another run ID stops. The state is written with an ETag check, so a new start is not overwritten.
 
 ## Audit subscriptions
@@ -127,7 +129,7 @@ Table `processedevents`, partition `events`. A row means "done". Each run reads 
 
 The prefix keeps the two checks apart. A sign-in check of an event does not hide a compromise finding on the same event.
 
-An event is marked only after its alert is sent (or queued for the digest). If the send fails, the next run tries again while the content stays in the window.
+An event is marked only after its alert is sent or queued, or a setting or mute suppresses it. If delivery and queueing fail, the run keeps the checkpoint. The first attempted window start is also saved. Later runs retry from that checkpoint, up to `MAX_CATCHUP_MINUTES`.
 
 ## Sign-in IP check
 
@@ -139,7 +141,7 @@ An event is marked only after its alert is sent (or queued for the digest). If t
 6. Log each suspicious sign-in. Send an email or queue it for the digest, as set by `LOGIN_ALERT_CONFIDENCE` and `LOGIN_ALERT_MODE`. A failed sign-in (wrong password) is only logged and kept in the journal (status "alert off"), unless `LOGIN_ALERT_FAILED` is on. A correct password stopped by MFA or Conditional Access is not a failure here. One alert for each user, IP, outcome (success or failure), and UTC day (row `signinalert-<hash>` in the events table); the other records of the same sign-in are only logged.
 
 Before the checks, a sign-in record whose `UserId` is not a UPN (for example `Not Available`) gets the user from another record of the same session (`DeviceProperties` `SessionId`) in the batch, from a UPN in `Actor`, or from a user object ID in `Actor` (Graph, `User.ReadBasic.All`). The original value stays in `UserIdInRecord`.
-7. Send the sign-ins from IPs that are not flagged to the country baseline (`geo_monitor`). For each new-country anomaly: log it, apply `ANOMALY_ACTION` (`responder`), and send an email.
+7. Send the sign-ins from IPs that are not flagged to the country baseline (`geo_monitor`). Save each new-country anomaly in `signincountries` (partition `pending`) before updating the baseline. Then log it, apply `ANOMALY_ACTION` (`responder`), and send an email. A failed delivery stays pending for up to 7 days, even after the source record leaves the fetch window. The response result is kept so an email retry does not repeat the action. Mark the sign-in processed only after the baseline and pending alerts are saved.
 
 A failed IP lookup is "skipped". The sign-in goes to the `pendingip` queue and is marked processed. Each run checks the queue again, for up to 26 hours. Without storage, the event is not marked, so the next run tries again while it is in the window.
 
@@ -170,9 +172,11 @@ Rows older than 30 days are deleted by the weekly cleanup. Microsoft's AiTM hunt
 1. Counts the records per day of the event (`system` / `mailaccess-YYYY-MM-DD`). Each record counts once: the run fetches an 8-minute window every 2 minutes, so the IDs of the counted records are kept for 200 minutes (`system` / `mailaccess-seen`). The Overview and the weekly report show if the tenant logs mail access.
 2. Keeps each user and IP of a successful sign-in (`signinip`, 7 days).
 3. Groups the mail access records by user and IP. Only clients that show the user's own IP count (`Client=OWA`, `MSExchangeRPC`, `OutlookService`, `ActiveSync`, `WebServices`, `IMAP4`, `POP3`). Graph records (`Client=REST`) carry a Microsoft IP and are skipped.
-4. Skips private and allowlisted IPs, IPs that signed in as the user in 7 days, and user, IP, and day combinations that already have a finding.
+4. Skips private and allowlisted IPs, IPs that signed in as the user in 7 days, and user, IP, and day combinations that already have a high finding.
 5. Looks up the rest (at most `MAIL_ACCESS_MAX_LOOKUPS` per run; the IP cache and iCloud Private Relay list apply). Microsoft networks are skipped.
 6. A VPN, proxy, hosting, or Tor IP, or a new country for the user, is a finding (`mail_access`). High: Tor or a similar anonymizer, or mail sent or a folder downloaded from a flagged IP. Else medium.
+
+Each user, IP, and day can have one medium finding and one later high finding. A medium finding that was muted does not suppress the high finding. After a high finding, neither severity sends another alert for that day.
 
 A token refresh is a non-interactive sign-in, which is not in the unified audit log. So mail access from an IP with no sign-in is the visible trace of a replayed refresh token.
 

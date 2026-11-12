@@ -168,7 +168,11 @@ def _fetch_window(events_table, content_type: str, now: datetime) -> tuple:
     """Return (start, end) for this run's fetch of ``content_type``."""
     start = now - timedelta(minutes=config.LOOKBACK_MINUTES)
     checkpoint = _read_checkpoint(events_table, content_type)
-    if checkpoint is None or checkpoint >= start:
+    if checkpoint is None:
+        # Keep the first attempted window too, if processing or delivery fails.
+        _write_checkpoint(events_table, content_type, start)
+        return start, now
+    if checkpoint >= start:
         return start, now
 
     floor = now - timedelta(minutes=config.MAX_CATCHUP_MINUTES)
@@ -405,6 +409,7 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
     queued = read_pending_ips(events_table, config.PENDING_IP_MAX_ROWS) if events_table else []
     if not login_events and not queued:
         logging.info("No login events found in the specified time range")
+        _handle_country_anomalies(events_table, [])
         return
 
     # (event, event_key, ip, queued_at). queued_at is None for a new sign-in.
@@ -428,6 +433,7 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
 
     if not pending:
         logging.info(f"Processed {len(login_events)} login events, 0 required IP checks")
+        _handle_country_anomalies(events_table, [])
         return
 
     ip_results = check_ips_batch(sorted(ips_to_check), ip_cache_table)
@@ -436,12 +442,15 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
     skipped_count = 0
     alerted = {}         # suspicious sign-in alerts of this run (user, IP, outcome, day) -> journal row
     observations = []  # country baseline input: sign-ins from IPs that are not flagged
+    clean_events = []
+    failed = False
 
     for event, event_key, ip, queued_at in pending:
         ip_data = ip_results.get(ip)
         if not ip_data:
             skipped_count += 1
-            _defer_ip_check(events_table, event, event_key, ip, queued_at)
+            if not _defer_ip_check(events_table, event, event_key, ip, queued_at):
+                failed = True
             continue
 
         analysis = analyze_ip(ip_data)
@@ -451,17 +460,19 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
                 "outcome": geo_monitor.sign_in_outcome(event), "ip": ip,
                 "event": event, "analysis": analysis,
             })
+            clean_events.append((event_key, queued_at))
+            continue  # acknowledge only after the country baseline and pending alerts are saved
 
-        done = True
-        if analysis["is_suspicious"]:
-            suspicious_count += 1
-            logging.warning(
-                f"Suspicious login: User={event.get('UserId')}, "
-                f"IP={ip}, Flags={','.join(analysis['flags'])}, Confidence={analysis['confidence']}, "
-                f"Result={login_result(event)}, "
-                f"Org={analysis['org']}, Location={analysis['city']},{analysis['country']}"
-            )
-            done = _alert_signin(events_table, event, event_key, ip, analysis, alerted)
+        suspicious_count += 1
+        logging.warning(
+            f"Suspicious login: User={event.get('UserId')}, "
+            f"IP={ip}, Flags={','.join(analysis['flags'])}, Confidence={analysis['confidence']}, "
+            f"Result={login_result(event)}, "
+            f"Org={analysis['org']}, Location={analysis['city']},{analysis['country']}"
+        )
+        done = _alert_signin(events_table, event, event_key, ip, analysis, alerted)
+        if not done:
+            failed = True
 
         if done and events_table:
             mark_event_processed(event_key, events_table)
@@ -478,6 +489,13 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
         logging.info(f"Pending IP checks: {len(queued)} read from the queue")
 
     _handle_country_anomalies(events_table, observations)
+    for event_key, queued_at in clean_events:
+        if events_table:
+            mark_event_processed(event_key, events_table)
+            if queued_at is not None:
+                delete_pending_ip(events_table, event_key)
+    if failed:
+        raise RuntimeError("Sign-in checks remain neither delivered nor queued")
 
 
 def _signin_finding(event: dict, ip: str, analysis: dict) -> dict:
@@ -605,38 +623,57 @@ def _alert_signin_once(events_table, event: dict, event_key: str, ip: str, analy
 
 def _handle_country_anomalies(events_table, observations: list) -> None:
     """Find sign-ins from countries outside each user's baseline. Alert and respond."""
-    if not events_table or not observations:
+    if not events_table:
         return
     geo_table = geo_monitor.table_client()
+    if geo_table is None:
+        if observations and config.GEO_ANOMALY_ENABLED:
+            raise RuntimeError("Country baseline storage is unavailable")
+        return
     now = datetime.now(timezone.utc)
-    for anomaly in geo_monitor.evaluate(geo_table, observations, now):
+    anomalies = geo_monitor.evaluate(geo_table, observations, now, durable=True)
+    anomalies += geo_monitor.pending_anomalies(
+        geo_table, now, exclude={geo_monitor.pending_key(a) for a in anomalies})
+    for anomaly in anomalies:
         event = anomaly["event"]
+        key = f"country_{get_event_key(event)}"
+        if _was_processed(events_table, key):
+            geo_monitor.mark_delivered(geo_table, anomaly)
+            continue
         logging.warning(
             f"Country anomaly: User={event.get('UserId')}, Country={anomaly['country']}, "
             f"IP={anomaly['ip']}, Result={login_result(event)}, "
             f"Known={','.join(anomaly['known']) or 'none'}"
         )
-        result = responder.respond(geo_table, str(event.get("UserId", "")), anomaly["outcome"],
-                                   anomaly["learning"], now)
+        response_key = f"response_{key}"
+        result = _response_result(events_table, response_key)
+        if not result:
+            result = responder.respond(geo_table, str(event.get("UserId", "")), anomaly["outcome"],
+                                       anomaly["learning"], now)
+            if result:
+                _mark_response(events_table, response_key, result)
         finding = {"type": "new_country", "severity": "high", "user": str(event.get("UserId", "")),
                    "description": (f"Sign-in ({login_result(event)}) from {anomaly['country']}, "
                                    f"IP {anomaly['ip']}. Usual: {', '.join(anomaly['known']) or 'none'}."),
                    "ip": anomaly["ip"], "event": event}
-        key = f"country_{get_event_key(event)}"
         jt = journal.table_client()
         sent = send_country_anomaly_alert(anomaly, result, outbox=events_table,
                                           related=journal.related(jt, finding, key, now))
         journal.record(jt, finding, key, "emailed" if sent else "email failed", action=result, now=now)
+        if sent:
+            mark_event_processed(key, events_table)
+            geo_monitor.mark_delivered(geo_table, anomaly)
 
 
-def _defer_ip_check(events_table, event: dict, event_key: str, ip: str, queued_at) -> None:
-    """Keep a sign-in whose IP lookup failed, so that a later run checks it."""
+def _defer_ip_check(events_table, event: dict, event_key: str, ip: str, queued_at) -> bool:
+    """Keep a sign-in whose IP lookup failed. True if queued or its retry period ended."""
     if not events_table:
-        return  # no queue: the next run tries again while the event is in the window
+        return False
     if queued_at is None:
         if queue_pending_ip(event_key, event, ip, events_table):
             mark_event_processed(event_key, events_table)
-        return
+            return True
+        return False
     if datetime.now(timezone.utc) - queued_at > timedelta(hours=config.PENDING_IP_MAX_HOURS):
         logging.error(
             f"Sign-in IP check abandoned after {config.PENDING_IP_MAX_HOURS} hours: "
@@ -644,6 +681,7 @@ def _defer_ip_check(events_table, event: dict, event_key: str, ip: str, queued_a
             "Check the proxycheck.io key and quota."
         )
         delete_pending_ip(events_table, event_key)
+    return True
 
 
 _DETECTORS = (
@@ -711,6 +749,7 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     geo_table = geo_monitor.table_client() if events_table else None
     now = datetime.now(timezone.utc)
     sent_count = 0
+    failed = False
     for finding in new_findings:
         ip_context = ""
         ip = finding.get("ip")
@@ -732,11 +771,15 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
         if _deliver_finding(finding, ip_context, events_table, processed_keys, geo_table, now,
                             ip_unchecked=ip_unchecked):
             sent_count += 1
+        elif finding_key(finding) not in processed_keys:
+            failed = True
 
     logging.info(
         f"Compromise check: {len(new_findings)} new findings, {sent_count} alerts sent or queued, "
         f"{len(events)} events"
     )
+    if failed:
+        raise RuntimeError("Compromise alerts remain neither delivered nor queued")
 
 
 def _record_install_grant(finding: dict, events_table, processed_keys: set, now: datetime) -> None:
@@ -782,6 +825,7 @@ def _deliver_finding(finding: dict, ip_context: str, events_table, processed_key
             f"user={finding['user']}, severity={finding['severity']}"
         )
         journal.record(jt, finding, key, "alert off", ip_context=ip_context, now=now)
+        processed_keys.add(key)
         if events_table:
             mark_event_processed(key, events_table)
         return False
@@ -799,6 +843,7 @@ def _deliver_finding(finding: dict, ip_context: str, events_table, processed_key
         )
         journal.record(jt, finding, key, "muted", ip_context=ip_context,
                        action=admin_store.describe_mute(mute), now=now)
+        processed_keys.add(key)
         if events_table:
             mark_event_processed(key, events_table)
         return False
@@ -823,8 +868,10 @@ def _deliver_finding(finding: dict, ip_context: str, events_table, processed_key
                                  related=journal.related(jt, finding, key, now))
     journal.record(jt, finding, key, "emailed" if sent else "email failed", ip_context=ip_context,
                    action=action_result, now=now)
-    if sent and events_table:
-        mark_event_processed(key, events_table)
+    if sent:
+        processed_keys.add(key)
+        if events_table:
+            mark_event_processed(key, events_table)
     return sent
 
 
@@ -903,8 +950,13 @@ def _run_mail_access_check(events_table, ip_cache_table, processed_keys: set, ex
         is_microsoft=session_monitor._is_microsoft, country_of=geo_monitor.country_of,
         cached=lambda ips: check_ips_batch(ips, ip_cache_table, cache_only=True),
         max_lookups=config.MAIL_ACCESS_MAX_LOOKUPS)
+    failed = False
     for finding in findings:
-        _deliver_finding(finding, finding.get("ip_context", ""), events_table, processed_keys, geo_table, now)
+        sent = _deliver_finding(finding, finding.get("ip_context", ""), events_table, processed_keys, geo_table, now)
+        if not sent and finding_key(finding) not in processed_keys:
+            failed = True
+    if failed:
+        raise RuntimeError("Mail access alerts remain neither delivered nor queued")
 
 
 def _digest_entry(event: dict, ip: str, analysis: dict) -> dict:

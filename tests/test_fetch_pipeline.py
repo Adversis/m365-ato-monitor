@@ -53,7 +53,7 @@ class TestPerTypeFetch:
         assert monitor["login"].call_args.args[3] == [login]
         assert monitor["compromise"].call_args.args[3] == [login]
         assert table.checkpoint(AAD) is not None
-        assert table.checkpoint(EXCH) is None
+        assert table.checkpoint(EXCH) == monitor["fetch"].call_args_list[1].args[1]
 
     def test_incomplete_fetch_does_not_move_checkpoint(self, monitor, table):
         from function_app import audit_log_monitor
@@ -61,7 +61,7 @@ class TestPerTypeFetch:
 
         audit_log_monitor(None)
 
-        assert table.checkpoint(AAD) is None
+        assert table.checkpoint(AAD) == monitor["fetch"].call_args_list[0].args[1]
         assert table.checkpoint(EXCH) is not None
 
     def test_processing_error_does_not_move_checkpoint(self, monitor, table):
@@ -72,8 +72,8 @@ class TestPerTypeFetch:
         audit_log_monitor(None)
 
         monitor["compromise"].assert_called_once()  # still runs
-        assert table.checkpoint(AAD) is None
-        assert table.checkpoint(EXCH) is None
+        assert table.checkpoint(AAD) == monitor["fetch"].call_args_list[0].args[1]
+        assert table.checkpoint(EXCH) == monitor["fetch"].call_args_list[1].args[1]
 
     def test_completion_trace_only_after_a_fetch(self, monitor, caplog):
         """The install.ps1 health alert fires when this trace is absent for 1 hour. Keep the text."""
@@ -299,6 +299,7 @@ class TestFullRunThroughHttp:
         table, cache = FakeTable(), FakeTable()
         sent = []
         with patch("function_app._get_table_clients", return_value=(table, cache)), \
+             patch("geo_monitor.table_client", return_value=FakeTable()), \
              patch("config.http", self._http(sent)):
             audit_log_monitor(None)
             first = list(sent)
@@ -318,7 +319,8 @@ class TestFullRunThroughHttp:
         from function_app import audit_log_monitor
         table, cache = FakeTable(), FakeTable()
         sent = []
-        with patch("function_app._get_table_clients", return_value=(table, cache)):
+        with patch("function_app._get_table_clients", return_value=(table, cache)), \
+             patch("geo_monitor.table_client", return_value=FakeTable()):
             with patch("config.http", self._http(sent, graph_status=403, proxycheck_status="denied")):
                 audit_log_monitor(None)
             assert sent == []

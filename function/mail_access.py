@@ -23,7 +23,8 @@ refresh is not in the unified audit log. The check groups the records by user
 and IP, skips IPs that signed in as the user in the last SIGNIN_DAYS days
 (the sign-in check covers them), looks up the rest, and reports an IP that
 is a VPN, proxy, hosting, or Tor address, or that is in a new country for
-the user. One finding per user, IP, and day.
+the user. One finding per user, IP, and day at each severity. A later high
+finding still alerts after a medium finding was sent or muted.
 
 Only clients that show the user's own IP count: Outlook on the web, Outlook
 desktop (MAPI), Outlook mobile, Exchange ActiveSync, EWS, IMAP, and POP.
@@ -369,7 +370,7 @@ def check(records: list, lookup: Callable[[list], dict], analyze: Callable[[dict
     for (user, ip), g in observations(records).items():
         day = (g["first"] or now.strftime("%Y-%m-%dT%H:%M:%S"))[:10]
         g["id"] = dedup_id(user, ip, day)
-        if skip_ip(ip) or done(f"mail_access_{g['id']}") or known(user, ip):
+        if skip_ip(ip) or done(f"mail_access_{g['id']}-high") or known(user, ip):
             continue
         candidates.append(g)
     if not candidates:
@@ -399,7 +400,13 @@ def check(records: list, lookup: Callable[[list], dict], analyze: Callable[[dict
             why = f"an IP in {cc}, a new country for this user ({analysis.get('org') or 'unknown network'})"
         else:
             continue
-        findings.append(_finding(g, why, analysis, cc))
+        finding = _finding(g, why, analysis, cc)
+        if finding["severity"] == "high":
+            # The medium key may already be muted. Give an escalation its own
+            # delivery key and journal row, then suppress further daily repeats.
+            finding["event"]["Id"] += "-high"
+        if not done(f"mail_access_{finding['event']['Id']}"):
+            findings.append(finding)
     return findings
 
 

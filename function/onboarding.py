@@ -295,15 +295,28 @@ def _history(events_table, ip_cache_table, detectors, state: dict, now: datetime
         if cursor >= end:
             break
         window_end = min(cursor + timedelta(hours=WINDOW_HOURS), end)
-        records = []
+        by_type = {}
+        complete = True
         for content_type in CONTENT_TYPES:
             try:
-                recs, _ = fetch_content_records(content_type, cursor, window_end)
+                recs, fetched = fetch_content_records(content_type, cursor, window_end)
+                if not fetched:
+                    raise RuntimeError("one or more content blobs could not be read")
             except Exception as e:
+                complete = False
                 text = f"{content_type}: {config.redact(e)[:200]}"
                 if text not in h["errors"]:
                     h["errors"] = (h["errors"] + [text])[-5:]
                 continue
+            by_type[content_type] = recs
+        if not complete:
+            # Retry the whole window. Count and seed only complete windows, so
+            # partial retries cannot inflate the starting-state report.
+            h["cursor"] = cursor.strftime(_TS)
+            _save(events_table, state)
+            return False
+        records = []
+        for content_type, recs in by_type.items():
             records += recs
             if content_type == AAD_CONTENT_TYPE:
                 logins = filter_login_records(recs)

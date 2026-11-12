@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
+import pytest
 
 from tests import mock_data
 from tests.test_end_to_end import _mock_batch_post
@@ -39,7 +40,8 @@ class TestDigestQueueing:
         ip_cache_table = MagicMock()
         ip_cache_table.get_entity.side_effect = Exception("Not found")
 
-        _run_login_check(events_table, ip_cache_table, set(), [mock_data.EVENT_VPN_LOGIN])
+        with pytest.raises(RuntimeError, match="neither delivered nor queued"):
+            _run_login_check(events_table, ip_cache_table, set(), [mock_data.EVENT_VPN_LOGIN])
 
         events_table.upsert_entity.assert_not_called()  # retried next run
 

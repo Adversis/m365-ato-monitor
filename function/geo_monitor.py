@@ -21,7 +21,8 @@ Rules:
     policy stopped them) are anomalies too. They never join the baseline.
 
 Storage: table "signincountries". One row per user (partition "user"), one
-tenant row, and one row per day for the response-action counter.
+tenant row, and one row per day for the response-action counter. Partition
+"pending" keeps country alerts until they are sent or queued, for up to 7 days.
 """
 
 import hashlib
@@ -37,8 +38,12 @@ import config
 TABLE_NAME = "signincountries"
 _USER_PARTITION = "user"
 _TENANT_KEY = ("tenant", "tenant")
-_MAX_DAYS_KEPT = 10
+_MAX_DAYS_KEPT = 30  # the largest GEO_PROMOTE_DAYS value in the management UI
 _REALERT = timedelta(hours=24)
+_PENDING_PARTITION = "pending"
+_PENDING_DAYS = 7
+_PENDING_EVENT_FIELDS = ("Id", "RecordType", "CreationTime", "Operation", "UserId", "ClientIP",
+                         "ErrorNumber", "ErrorCode", "LogonError", "ResultStatus")
 
 # Sign-in errors that come after a correct password.
 PASSWORD_OK_ERRORS = {
@@ -124,19 +129,23 @@ def _tenant_known(tenant_countries: dict, today: date) -> set:
     return {cc for cc, last in tenant_countries.items() if str(last) >= cutoff}
 
 
-def evaluate(table, observations: list, now: datetime) -> list:
+def evaluate(table, observations: list, now: datetime, *, durable: bool = False) -> list:
     """Update the baselines and return the anomalies.
 
     ``observations``: dicts with user, country, outcome, ip, event, analysis.
     Each anomaly is the observation plus ``known`` (the baseline used) and
-    ``learning`` (True while the learning period runs). Never raises.
+    ``learning`` (True while the learning period runs). With ``durable``, save
+    pending alerts before changing the baseline, and raise on storage failure
+    so the monitor retries the records. Other callers get [] on failure.
     """
     if table is None or not config.GEO_ANOMALY_ENABLED or not observations:
         return []
     try:
-        return _evaluate(table, observations, now)
+        return _evaluate(table, observations, now, durable=durable)
     except Exception as e:
         logging.error(f"Country anomaly check failed: {type(e).__name__}: {e}")
+        if durable:
+            raise
         return []
 
 
@@ -159,7 +168,7 @@ def seed(table, observations: list, now: datetime) -> int:
     return len({str(o["user"]).strip().lower() for o in observations if o.get("country")})
 
 
-def _evaluate(table, observations: list, now: datetime, seed: bool = False) -> list:
+def _evaluate(table, observations: list, now: datetime, seed: bool = False, durable: bool = False) -> list:
     today = now.date()
     tenant = _load(table, _TENANT_KEY)
     tenant_dirty = False
@@ -198,7 +207,7 @@ def _evaluate(table, observations: list, now: datetime, seed: bool = False) -> l
             entry = countries.setdefault(cc, {"days": []})
             day = _event_day(obs["event"], now)
             if day not in entry["days"]:
-                entry["days"] = sorted(entry["days"] + [day])[-_MAX_DAYS_KEPT:]
+                entry["days"] = sorted(entry["days"] + [day])[-max(_MAX_DAYS_KEPT, config.GEO_PROMOTE_DAYS):]
                 state["dirty"] = True
             if (learning or no_reference) and not anomalous and not entry.get("learned"):
                 entry["learned"] = True
@@ -215,6 +224,16 @@ def _evaluate(table, observations: list, now: datetime, seed: bool = False) -> l
                 state["dirty"] = True
                 anomalies.append({**obs, "known": sorted(baseline), "learning": learning})
 
+    # A baseline write can suppress the next evaluation. Keep the alert first.
+    if durable:
+        for anomaly in anomalies:
+            event = anomaly["event"]
+            compact = {k: event[k] for k in _PENDING_EVENT_FIELDS if k in event}
+            table.upsert_entity({
+                "PartitionKey": _PENDING_PARTITION, "RowKey": pending_key(anomaly),
+                "anomaly": json.dumps({**anomaly, "event": compact}, default=str),
+                "created": now.isoformat(),
+            })
     for upn, state in users.items():
         if state["dirty"]:
             _prune(state["countries"], today)
@@ -228,6 +247,37 @@ def _evaluate(table, observations: list, now: datetime, seed: bool = False) -> l
         tenant["countries"] = json.dumps(tenant_countries, sort_keys=True)
         table.upsert_entity(tenant)
     return anomalies
+
+
+def pending_key(anomaly: dict) -> str:
+    event = anomaly.get("event") or {}
+    raw = f"{anomaly['user']}|{anomaly['country']}|{event.get('Id')}|{event.get('CreationTime')}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def pending_anomalies(table, now: datetime, exclude=()) -> list:
+    """Undelivered country alerts, including records outside the fetch window.
+
+    Storage errors raise: the monitor must not acknowledge an unread queue.
+    """
+    if table is None or not config.GEO_ANOMALY_ENABLED:
+        return []
+    out = []
+    for row in table.query_entities(f"PartitionKey eq '{_PENDING_PARTITION}'"):
+        if row["RowKey"] in exclude:
+            continue
+        created = datetime.fromisoformat(row["created"])
+        if now - created > timedelta(days=_PENDING_DAYS):
+            logging.error(f"Country alert dropped after {_PENDING_DAYS} days: {row['RowKey']}")
+            table.delete_entity(_PENDING_PARTITION, row["RowKey"])
+            continue
+        out.append(json.loads(row["anomaly"]))
+    return out
+
+
+def mark_delivered(table, anomaly: dict) -> None:
+    """Remove an alert only after it was sent or queued in the email outbox."""
+    table.delete_entity(_PENDING_PARTITION, pending_key(anomaly))
 
 
 def _prune(countries: dict, today: date) -> None:
@@ -314,7 +364,7 @@ def set_country(table, upn: str, cc: str, approve: bool, now: datetime) -> bool:
         entry = countries.setdefault(cc, {"days": []})
         today = now.date().isoformat()
         if today not in entry["days"]:
-            entry["days"] = sorted(entry["days"] + [today])[-_MAX_DAYS_KEPT:]
+            entry["days"] = sorted(entry["days"] + [today])[-max(_MAX_DAYS_KEPT, config.GEO_PROMOTE_DAYS):]
         entry["learned"] = True
         entry["approved"] = True
     elif cc in countries:

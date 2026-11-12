@@ -193,7 +193,8 @@ class TestMonitorRun:
         send, _ = self._run(table, [owa_read()])
         assert send.call_count == 1 and send.call_args.args[0]["type"] == "mail_access"
         send, lookup = self._run(table, [owa_read(when="2026-11-09T09:00:00")])
-        assert send.call_count == 0 and not lookup.called                    # done today: no lookup either
+        assert send.call_count == 0
+        assert all(c.kwargs.get("cache_only") for c in lookup.call_args_list)  # check for escalation from cache
 
     def test_sign_in_from_the_ip_in_the_same_run(self):
         login = {"Operation": "UserLoggedIn", "UserId": USER, "ClientIP": "81.2.69.160"}

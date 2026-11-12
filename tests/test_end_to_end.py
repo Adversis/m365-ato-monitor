@@ -9,6 +9,7 @@ lists to those functions directly. tests/test_fetch_pipeline.py tests the fetch.
 """
 
 from unittest.mock import patch, MagicMock
+import pytest
 from tests import mock_data
 
 
@@ -119,7 +120,8 @@ class TestLoginCheck:
         ip_cache_table = MagicMock()
         ip_cache_table.get_entity.side_effect = Exception("Not found")
 
-        _run_login_check(events_table, ip_cache_table, set(), [mock_data.EVENT_VPN_LOGIN])
+        with pytest.raises(RuntimeError, match="neither delivered nor queued"):
+            _run_login_check(events_table, ip_cache_table, set(), [mock_data.EVENT_VPN_LOGIN])
 
         events_table.upsert_entity.assert_not_called()
 
@@ -263,7 +265,8 @@ class TestResilienceOnFailure:
     def test_proxycheck_failure_without_storage_marks_nothing(self, mock_http):
         from function_app import _run_login_check
         mock_http.post.return_value = MagicMock(status_code=500)
-        _run_login_check(None, None, set(), [mock_data.EVENT_VPN_LOGIN])  # must not raise
+        with pytest.raises(RuntimeError, match="neither delivered nor queued"):
+            _run_login_check(None, None, set(), [mock_data.EVENT_VPN_LOGIN])
 
     @patch("config.http")
     def test_skipped_count_logged(self, mock_http, caplog):
@@ -274,7 +277,7 @@ class TestResilienceOnFailure:
         fail_resp.status_code = 500
         mock_http.post.return_value = fail_resp
 
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.INFO), pytest.raises(RuntimeError, match="neither delivered nor queued"):
             _run_login_check(None, None, set(), [mock_data.EVENT_VPN_LOGIN])
 
         assert "1 skipped" in caplog.text
@@ -375,7 +378,8 @@ class TestCompromiseCheck:
         mock_alert.return_value = False
         table = MagicMock()
 
-        _run_compromise_check(table, None, set(), [INBOX_RULE_EVENT])
+        with pytest.raises(RuntimeError, match="neither delivered nor queued"):
+            _run_compromise_check(table, None, set(), [INBOX_RULE_EVENT])
 
         table.upsert_entity.assert_not_called()
 
