@@ -218,12 +218,12 @@ def recent_emails(table, limit: int = 50) -> list:
 
 
 # -----------------------------------------------------------------------------
-# Mutes: no email for medium alerts of one type, one user, or one inbox rule,
-# for 1 to 90 days. High alerts are always sent. Each change is recorded in
-# History and emailed (the caller does this).
+# Mutes: no email for medium alerts of one type, one user, one inbox rule, or
+# one network (ASN), for 1 to MUTE_MAX_DAYS days. High alerts are always sent.
+# Each change is recorded in History and emailed (the caller does this).
 # -----------------------------------------------------------------------------
 
-MUTE_MAX_DAYS = 90
+MUTE_MAX_DAYS = 3650
 _MUTE_PARTITION = "mutes"
 _MUTE_UPN_RE = re.compile(r"^[^@\s,;]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,63}$")
 _active_mutes = []   # loaded by refresh()
@@ -239,7 +239,8 @@ def _parse_time(text) -> Optional[datetime]:
 
 def _mute_row(entity: dict) -> dict:
     return {"id": entity.get("RowKey", ""), "type": entity.get("type", "*"), "user": entity.get("user", "*"),
-            "rule_name": entity.get("rule_name", ""), "until": entity.get("until", ""),
+            "rule_name": entity.get("rule_name", ""), "asn": entity.get("asn", ""),
+            "network": entity.get("network", ""), "until": entity.get("until", ""),
             "reason": entity.get("reason", ""), "created_by": entity.get("created_by", ""),
             "created_at": entity.get("created_at", ""), "ended_by": entity.get("ended_by", ""),
             "ended_at": entity.get("ended_at", "")}
@@ -272,18 +273,23 @@ def describe_mute(mute: dict) -> str:
              "all users" if mute.get("user", "*") == "*" else mute.get("user", "")]
     if mute.get("rule_name"):
         parts.append(f"rule '{mute['rule_name']}'")
+    if mute.get("asn"):
+        parts.append(f"network {mute['network']} ({mute['asn']})" if mute.get("network") else f"network {mute['asn']}")
     until = _parse_time(mute.get("until"))
     text = ", ".join(parts) + (f", until {until:%Y-%m-%d %H:%M} UTC" if until else "")
     return text + (f" ({mute['reason']})" if mute.get("reason") else "")
 
 
 def validate_mute(body: dict) -> dict:
-    """Return {type, user, rule_name, days, reason} or raise ValidationError."""
+    """Return {type, user, rule_name, asn, network, days, reason} or raise ValidationError."""
     errors = {}
     ftype = str(body.get("type") or "*").strip()
     user = str(body.get("user") or "*").strip().lower()
     rule = str(body.get("rule_name") or "").strip()
     reason = str(body.get("reason") or "").strip()
+    asn_text = str(body.get("asn") or "").strip()
+    asn = config.normalize_asn(asn_text)
+    network = " ".join(str(body.get("network") or "").split()) if asn else ""
     days = body.get("days")
     if ftype != "*" and ftype not in dict(settings_mod.MUTE_TYPES):
         errors["type"] = ("This alert type cannot be muted (it is always high)."
@@ -296,13 +302,18 @@ def validate_mute(body: dict) -> dict:
         errors["rule_name"] = "A rule name applies to inbox rule alerts only."
     if len(rule) > 255 or any(ord(c) < 32 for c in rule):
         errors["rule_name"] = "At most 255 characters, no control characters."
+    if asn_text and not asn:
+        errors["asn"] = "Enter an ASN, for example AS63023, or leave it empty for all networks."
+    if len(network) > 200 or any(not c.isprintable() for c in network):
+        errors["asn"] = "The network name must be at most 200 printable characters."
     if not 3 <= len(reason) <= 200 or any(ord(c) < 32 for c in reason):
         errors["reason"] = "Enter a reason of 3 to 200 characters."
     if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= MUTE_MAX_DAYS:
         errors["days"] = f"Enter a whole number of days from 1 to {MUTE_MAX_DAYS}."
     if errors:
         raise ValidationError(errors)
-    return {"type": ftype, "user": user, "rule_name": rule, "days": days, "reason": reason}
+    return {"type": ftype, "user": user, "rule_name": rule, "asn": asn, "network": network, "days": days,
+            "reason": reason}
 
 
 def add_mute(table, body: dict, by: str, now: Optional[datetime] = None) -> dict:
@@ -311,6 +322,7 @@ def add_mute(table, body: dict, by: str, now: Optional[datetime] = None) -> dict
     m = validate_mute(body)
     row = {"PartitionKey": _MUTE_PARTITION, "RowKey": secrets.token_hex(8),
            "type": m["type"], "user": m["user"], "rule_name": m["rule_name"],
+           "asn": m["asn"], "network": m["network"],
            "until": (now + timedelta(days=m["days"])).isoformat(), "reason": m["reason"],
            "created_by": by, "created_at": now.isoformat()}
     table.upsert_entity(row)
@@ -346,8 +358,11 @@ def active_mutes(now: Optional[datetime] = None) -> list:
 
 
 def matching_mute(ftype: str, user: str, rule_name: str = "", severity: str = "",
-                  now: Optional[datetime] = None) -> Optional[dict]:
-    """The active mute that hides this alert, or None. High alerts are never muted."""
+                  now: Optional[datetime] = None, asn: str = "") -> Optional[dict]:
+    """The active mute that hides this alert, or None. High alerts are never muted.
+
+    A mute with an ASN hides only alerts whose source IP is in that network (``asn``).
+    """
     if severity == "high":
         return None
     now = now or _now()
@@ -360,6 +375,8 @@ def matching_mute(ftype: str, user: str, rule_name: str = "", severity: str = ""
         if m["type"] not in ("*", ftype) or m["user"] not in ("*", user):
             continue
         if m.get("rule_name") and m["rule_name"].lower() != rule_name:
+            continue
+        if m.get("asn") and m["asn"] != config.normalize_asn(asn):
             continue
         return m
     return None

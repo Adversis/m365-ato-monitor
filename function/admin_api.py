@@ -562,8 +562,11 @@ def mutes(req: func.HttpRequest) -> func.HttpResponse:
                       "Mute ended", f"ended a mute in the management UI: {text}.")
         else:
             return _error(400, "Action must be add or end.")
-    return _json({"mutes": admin_store.list_mutes(table, now, include_expired=True)[:100],
-                  "types": [list(t) for t in settings_mod.MUTE_TYPES], "max_days": admin_store.MUTE_MAX_DAYS})
+    out = {"mutes": admin_store.list_mutes(table, now, include_expired=True)[:100],
+           "types": [list(t) for t in settings_mod.MUTE_TYPES], "max_days": admin_store.MUTE_MAX_DAYS}
+    if mutating and body.get("action") == "add":
+        out["added"] = mute
+    return _json(out)
 
 
 def findings(req: func.HttpRequest) -> func.HttpResponse:
@@ -603,6 +606,21 @@ WINDOW_MAX = 2000
 _TRIAGE_FILTERS = {"": None, "open": journal.OPEN, "investigating": ("investigating",),
                    "benign": ("benign",), "resolved": ("resolved",)}
 TRIAGE_LABELS = {"": "Open", "investigating": "Investigating", "benign": "Benign", "resolved": "Resolved"}
+
+
+def finding_record(req: func.HttpRequest) -> func.HttpResponse:
+    """GET ?id=<finding row ID>: the audit record of one alert, as the alert email shows it."""
+    user = guard(req)
+    if isinstance(user, func.HttpResponse):
+        return user
+    try:
+        found = journal.audit_record(journal.table_client(), req.params.get("id") or "")
+    except Exception as e:
+        logging.error(f"Audit record not read: {type(e).__name__}")
+        return _error(503, "The audit record was not read. Try again.")
+    if found is None:
+        return _error(404, "No such alert. Reload the page.")
+    return _json(found)
 
 
 def triage(req: func.HttpRequest) -> func.HttpResponse:

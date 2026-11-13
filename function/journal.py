@@ -13,6 +13,12 @@ Table "monitorfindings":
 ``status`` says what the monitor did: emailed, email failed, alert off, muted,
 or onboarding (found by the onboarding scan, listed in its report).
 
+The audit record of a finding is in its own row: PartitionKey "r-" + the same
+hash, the same RowKey, fields ``event`` (JSON, at most _MAX_EVENT characters)
+and ``logged_at``. The list queries do not read these rows (they have no
+``at``), so a list does not download every record. ``purge`` deletes them
+with the finding rows.
+
 No function raises. Without storage, reads return [] and writes do nothing.
 """
 
@@ -34,6 +40,8 @@ KEEP_DAYS = 90
 CONTEXT_HOURS = 24
 _TS = "%Y-%m-%dT%H:%M:%SZ"
 _MAX_TEXT = 1000
+_MAX_EVENT = 30_000   # a Table Storage string holds at most 32K characters
+_RECORD_PREFIX = "r-"
 
 STATUSES = ("emailed", "email failed", "alert off", "muted", "onboarding", "install", "microsoft")
 # Rows that no view shows: permissions that install.ps1 granted to the monitor app (older
@@ -42,6 +50,7 @@ HIDDEN = ("install",)
 # The triage state that an admin sets in the management UI. "" is open (not looked at yet).
 TRIAGE_STATES = ("", "investigating", "benign", "resolved")
 OPEN = ("", "investigating")
+_GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _ROW_ID = re.compile(r"^(u-[0-9a-f]{32})\|(\d{13}-[0-9a-f]{12})$")
 _MAX_NOTE = 300
 # Not alerts: the onboarding scan's history, the permissions that install.ps1 granted, and
@@ -136,11 +145,65 @@ def record(table, finding: dict, key: str, status: str, *, ip_context: str = "",
             "targets": json.dumps(list(finding.get("targets") or [])[:20]),
             "operation": str(event.get("Operation") or "")[:100],
             "record_id": str(event.get("Id") or "")[:100],
+            "client": client_of(event)[:300],
+            "asn": str(finding.get("asn") or "")[:16], "network": str(finding.get("network") or "")[:200],
             "key": key[:300], "run_id": str(run_id or "")[:32],
         })
     except Exception as e:
         logging.warning(f"Could not record finding: {type(e).__name__}")
+        return True
+    if event:
+        try:
+            table.upsert_entity({"PartitionKey": _RECORD_PREFIX + pk[2:], "RowKey": rk,
+                                 "event": event_text(event), "logged_at": now.strftime(_TS)})
+        except Exception as e:
+            logging.warning(f"Could not keep the audit record of a finding: {type(e).__name__}")
     return True
+
+
+def client_of(event: dict) -> str:
+    """The client of an audit record: ClientInfoString, else the user agent of a sign-in, else ""."""
+    text = str(event.get("ClientInfoString") or event.get("UserAgent") or "").strip()
+    if not text:
+        for prop in event.get("ExtendedProperties") or []:
+            if isinstance(prop, dict) and prop.get("Name") == "UserAgent":
+                text = str(prop.get("Value") or "").strip()
+                break
+    return text
+
+
+def event_text(event: dict) -> str:
+    """The record as indented JSON (as in the alert email). A record longer than _MAX_EVENT is cut,
+    with a note (it is then not valid JSON, but still one field per line)."""
+    text = json.dumps(event, indent=2, default=str)
+    if len(text) > _MAX_EVENT:
+        text = text[:_MAX_EVENT] + " ... (truncated; see the unified audit log)"
+    return text
+
+
+def audit_record(table, row_id: str) -> Optional[dict]:
+    """{"record": the stored JSON text or "", "record_id": the audit record ID or ""} for a finding row.
+
+    None if ``row_id`` is not valid or the finding is not found. ``record`` is "" if the finding
+    was recorded before this version kept records, or if that write failed.
+    """
+    m = _ROW_ID.match(str(row_id or ""))
+    if table is None or not m:
+        return None
+    try:
+        entity = table.get_entity(partition_key=m.group(1), row_key=m.group(2))
+    except ResourceNotFoundError:
+        return None
+    if entity.get("status") in HIDDEN:
+        return None
+    try:
+        text = table.get_entity(partition_key=_RECORD_PREFIX + m.group(1)[2:], row_key=m.group(2)).get("event", "")
+    except ResourceNotFoundError:
+        text = ""
+    # Only a real audit record ID helps a search in Purview. Some findings use their own ID
+    # (mail access: one ID per user, IP, and day).
+    record_id = str(entity.get("record_id") or "")
+    return {"record": str(text or ""), "record_id": record_id if _GUID.match(record_id) else ""}
 
 
 def _row(entity: dict) -> dict:
@@ -156,6 +219,7 @@ def _row(entity: dict) -> dict:
         "rule_name": entity.get("rule_name", ""), "mailbox": entity.get("mailbox", ""),
         "targets": targets if isinstance(targets, list) else [],
         "operation": entity.get("operation", ""), "record_id": entity.get("record_id", ""),
+        "client": entity.get("client", ""), "asn": entity.get("asn", ""), "network": entity.get("network", ""),
         "key": entity.get("key", ""), "logged_at": entity.get("logged_at", ""),
         "run_id": entity.get("run_id", ""),
         "repeats": int(entity.get("repeats") or 0), "last_repeat": entity.get("last_repeat", ""),
@@ -289,15 +353,16 @@ def summary(rows: list) -> dict:
 
 
 def purge(table, now: Optional[datetime] = None) -> int:
-    """Delete rows logged more than KEEP_DAYS ago. Return the count."""
+    """Delete rows (findings and their audit records) logged more than KEEP_DAYS ago. Return the count of findings."""
     if table is None:
         return 0
     cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=KEEP_DAYS)).strftime(_TS)
     deleted = 0
     try:
-        for entity in list(table.query_entities(f"logged_at lt '{cutoff}'")):
+        rows = table.query_entities(f"logged_at lt '{cutoff}'", select=["PartitionKey", "RowKey"])
+        for entity in list(rows):
             table.delete_entity(entity["PartitionKey"], entity["RowKey"])
-            deleted += 1
+            deleted += not entity["PartitionKey"].startswith(_RECORD_PREFIX)   # count findings only
     except Exception as e:
         logging.warning(f"Could not purge findings: {type(e).__name__}")
     return deleted

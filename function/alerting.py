@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 import admin_store
 import config
+from ip_checker import network_fields
 import webhook
 import mail_access
 from o365_client import token_manager, resolve_user_object_id, login_result
@@ -225,10 +226,17 @@ def ui_url(fragment: str = "") -> str:
 
 
 def ui_link(view: str, *parts) -> str:
-    """Deep link into the UI: #user:<upn> or #mute:<type>:<upn>[:<rule>]. Each part is URL-encoded."""
+    """Deep link into the UI: #user:<upn> or #mute:<type>:<upn>[:<rule>[:<asn>[:<network>]]].
+
+    Each part is URL-encoded. Empty parts keep their place (a mute link with an ASN and no
+    rule has an empty rule part); empty parts at the end are left out.
+    """
     if not ui_url():
         return ""
-    return ui_url(":".join([view] + [quote(str(p), safe="@.") for p in parts if p not in (None, "")]))
+    texts = ["" if p is None else quote(str(p), safe="@.") for p in parts]
+    while texts and not texts[-1]:
+        texts.pop()
+    return ui_url(":".join([view] + texts))
 
 
 def _document(*, preheader: str, level: str, badge: str, kicker: str, title: str,
@@ -371,7 +379,8 @@ def _related(rows) -> str:
                    f'{head}<ul style="margin:8px 0 0;padding-left:20px;font-size:14px;">{items}</ul>{more}')
 
 
-def _respond_links(user: str, ftype: str, severity: str, rule_name: str = "") -> str:
+def _respond_links(user: str, ftype: str, severity: str, rule_name: str = "", asn: str = "",
+                   network: str = "") -> str:
     """Links to the user page (manual response) and, for medium alerts, to a prefilled mute."""
     page = ui_link("user", user) if "@" in str(user) else ""
     if not page:
@@ -379,7 +388,7 @@ def _respond_links(user: str, ftype: str, severity: str, rule_name: str = "") ->
     text = (f"In the {_link(page, 'management UI')}, you can see the user's alerts, revoke sessions, "
             "block sign-in, and turn off inbox rules.")
     if severity != "high" and ftype:
-        mute = ui_link("mute", ftype, user, rule_name)
+        mute = ui_link("mute", ftype, user, rule_name, config.normalize_asn(asn), network if asn else "")
         text += (f" If this alert is expected, {_link(mute, 'mute similar alerts')} for a set number of days.")
     return _p(text, muted=True)
 
@@ -531,7 +540,8 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
     parts.append(_steps([first]
                         + _COMPROMISE_STEPS.get(ftype, ["Look for other attacker activity on the account."])))
     if not is_test:
-        parts.append(_respond_links(raw_user, ftype, level, str(finding.get("rule_name") or "")))
+        parts.append(_respond_links(raw_user, ftype, level, str(finding.get("rule_name") or ""),
+                                    str(finding.get("asn") or ""), str(finding.get("network") or "")))
     parts.append(_heading("Details"))
     facts = [("User", _e(raw_user))]
     # The account that made the change and the account it applies to, where they are not the user.
@@ -624,7 +634,7 @@ def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=Non
             "Check the mailbox for new inbox rules and forwarding.",
             "Check the user's app consents and MFA methods.",
         ]),
-        _respond_links(raw_user, "suspicious_signin", level),
+        _respond_links(raw_user, "suspicious_signin", level, "", **network_fields(analysis)),
         _heading("Details"),
         _facts([
             ("User", _e(raw_user)),

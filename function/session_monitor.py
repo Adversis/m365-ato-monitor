@@ -25,7 +25,9 @@ Not detected: records without a session ID (about half of workload records,
 for example Outlook desktop and some API access), and an attacker on a
 normal network in the same country (AiTM kits often use a residential proxy
 in the victim's country). Exchange Graph REST records show a service IP and
-are ignored when the record identifies that API and client. Microsoft-owned
+are ignored when the record identifies that API and client. Exchange records
+from an Exchange Online server IP (mail_access.EXCHANGE_SERVER_NETS) are
+ignored too. Microsoft-owned
 networks also host customer VMs and are checked. Allowlisted IPs are ignored.
 
 Microsoft's AiTM hunting guidance uses the same join (SessionId, different
@@ -43,7 +45,7 @@ from azure.core.exceptions import ResourceNotFoundError
 import config
 import geo_monitor
 from mail_access import service_ip_client
-from ip_checker import extract_ip, is_allowed_ip, is_private_ip
+from ip_checker import extract_ip, is_allowed_ip, is_private_ip, network_fields
 
 TABLE_NAME = "signinsessions"
 PARTITION = "session"
@@ -53,7 +55,8 @@ PARTITION = "session"
 PENDING_PARTITION = "pending"
 PENDING_DAYS = 7
 PENDING_MAX = 50
-_PENDING_FIELDS = ("type", "severity", "user", "description", "ip", "session_id", "country", "mark", "ip_context")
+_PENDING_FIELDS = ("type", "severity", "user", "description", "ip", "session_id", "country", "mark", "ip_context",
+                   "asn", "network")
 _EVENT_FIELDS = ("Id", "CreationTime", "Operation", "UserId", "ClientIP", "ClientIPAddress", "Workload",
                  "RecordType", "ResultStatus", "UserAgent", "ApplicationId", "MailboxOwnerUPN", "SessionId")
 RETENTION_DAYS = 30
@@ -254,6 +257,7 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
             "mark": cc,
             "ip_context": f"Session first seen in {_first_country(countries, cc)}; now in {cc} ({org})"
                           + ("; this country is usual for the user" if usual else ""),
+            **network_fields(data),
         })
 
     # First the pending findings, then the session state. If a pending write fails, the error stops
@@ -351,6 +355,7 @@ def _network_finding(sid: str, user: str, ip: str, cc: str, normal: str, analysi
         "country": cc,
         "mark": NETWORK_MARK,
         "ip_context": f"Session first seen from {normal}; now from a {kind} IP in {cc} ({org})",
+        **network_fields(data),
     }
 
 

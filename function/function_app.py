@@ -37,7 +37,7 @@ from o365_client import (
 from ip_checker import (
     extract_ip, is_private_ip, is_allowed_ip,
     get_event_key, get_processed_keys, mark_event_processed,
-    check_ips_batch, analyze_ip,
+    check_ips_batch, analyze_ip, network_fields,
     queue_login_for_digest, read_login_digest, delete_login_digest,
     queue_pending_ip, read_pending_ips, delete_pending_ip,
 )
@@ -509,6 +509,7 @@ def _signin_finding(event: dict, ip: str, analysis: dict) -> dict:
         "description": (f"Sign-in ({login_result(event)}) from {ip}: {', '.join(analysis.get('flags', []))}, "
                         f"{analysis.get('org', '')}" + (f", {location}" if location else "")),
         "ip": ip, "event": event,
+        **network_fields(analysis),
     }
 
 
@@ -594,7 +595,8 @@ def _signin_suppression(event: dict, finding: dict, now: datetime) -> tuple:
     """("alert off" or "muted", the action text) if this sign-in sends no email now, else ("", "")."""
     if not config.LOGIN_ALERT_FAILED and geo_monitor.sign_in_outcome(event) == "failed":
         return "alert off", FAILED_SIGN_IN_OFF
-    mute = admin_store.matching_mute("suspicious_signin", finding["user"], "", finding["severity"], now)
+    mute = admin_store.matching_mute("suspicious_signin", finding["user"], "", finding["severity"], now,
+                                     asn=finding.get("asn", ""))
     if mute:
         return "muted", admin_store.describe_mute(mute)
     return "", ""
@@ -756,6 +758,7 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
         # A failed lookup (quota, timeout) leaves the finding medium. A mute must not hide it.
         ip_unchecked = bool(ip) and ip in finding_ips and ip not in ip_results
         if ip and ip in ip_results:
+            finding.update(network_fields(ip_results[ip]))
             analysis = analyze_ip(ip_results[ip])
             cc = geo_monitor.country_of(ip_results[ip])
             if analysis["is_suspicious"]:
@@ -830,7 +833,7 @@ def _deliver_finding(finding: dict, ip_context: str, events_table, processed_key
             mark_event_processed(key, events_table)
         return False
     mute = admin_store.matching_mute(finding["type"], finding["user"], finding.get("rule_name", ""),
-                                     finding["severity"], now)
+                                     finding["severity"], now, asn=finding.get("asn", ""))
     if mute and ip_unchecked:
         logging.warning(f"Mute {mute['id']} not applied: the source IP was not checked (IP lookup failed)")
         ip_context = ip_context or ("The source IP was not checked (the IP lookup failed). A mute matches "
@@ -919,7 +922,7 @@ def _run_session_check(events_table, ip_cache_table, processed_keys: set, record
         sent = _deliver_finding(finding, finding.get("ip_context", ""), events_table, processed_keys,
                                 geo_table, now)
         if sent or finding["type"] in config.ALERTS_OFF or admin_store.matching_mute(
-                finding["type"], finding["user"], "", finding["severity"], now):
+                finding["type"], finding["user"], "", finding["severity"], now, asn=finding.get("asn", "")):
             session_monitor.mark_alerted(table, finding["session_id"], mark, now)
 
 
@@ -1500,6 +1503,11 @@ def manage_mutes(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="manage/api/findings", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def manage_findings(req: func.HttpRequest) -> func.HttpResponse:
     return admin_api.findings(req)
+
+
+@app.route(route="manage/api/record", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def manage_record(req: func.HttpRequest) -> func.HttpResponse:
+    return admin_api.finding_record(req)
 
 
 @app.route(route="manage/api/triage", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

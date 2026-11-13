@@ -7,7 +7,7 @@
 
 const API = "/api/manage/api";
 const VIEWS = ["overview", "alerts", "users", "mutes", "settings", "countries", "history"];
-// Deep links from alert emails: "#user:<upn>", "#mute:<type>:<upn>[:<rule>]".
+// Deep links from alert emails: "#user:<upn>", "#mute:<type>:<upn>[:<rule>[:<asn>[:<network>]]]".
 const VIEW_ALIASES = { user: "users", mute: "mutes" };
 const STALE_MINUTES = 10;
 const EMAILS_SHOWN = 10;
@@ -1538,10 +1538,43 @@ function findingsTable(rows, withUser, onTriaged) {
     triageCell(r, onTriaged),
     [h("span", { text: r.description || "" }),
      r.ip_context ? h("span", { class: "sub", text: `IP: ${r.ip_context}` }) : null,
+     r.client ? h("span", { class: "sub", text: `Client: ${r.client}` }) : null,
      r.action ? h("span", { class: "sub", text: `Response: ${r.action}` }) : null,
      r.triage_by ? h("span", { class: "sub", text: triageText(r) }) : null,
-     alertActions(r, withUser)],
+     alertActions(r, withUser),
+     auditRecord(r)],
   ]));
+}
+
+// The audit record of an alert, as the alert email shows it. Loaded when the section opens.
+function auditRecord(r) {
+  if (!r.id) return null;
+  const out = h("div", { class: "record-body", "aria-live": "polite" });
+  const box = h("details", { class: "record" }, h("summary", { text: "Audit record" }), out);
+  let loaded = false;
+  box.addEventListener("toggle", async () => {
+    if (!box.open || loaded) return;
+    loaded = true;
+    fill(out, h("p", { class: "muted small", text: "Loading the audit record…" }));
+    try {
+      const data = await api(`/record?id=${encodeURIComponent(r.id)}`);
+      if (!data.record) {
+        fill(out, h("p", { class: "muted small", text: "The audit record is not kept for this alert. Alerts recorded " +
+          "before this version have no record. " + (data.record_id
+            ? `Record ID ${data.record_id}: search for it in Microsoft Purview > Audit.`
+            : "Search Microsoft Purview > Audit for the user and the time of the alert.") }));
+        return;
+      }
+      let text = data.record;
+      try { text = JSON.stringify(JSON.parse(data.record), null, 2); } catch (e) { /* cut record: show the text */ }
+      fill(out, h("pre", { class: "record-json", tabindex: "0", text }));
+    } catch (err) {
+      if (err instanceof SessionError) { handleError(err); return; }
+      loaded = false;
+      fill(out, h("p", { class: "field-error", text: err.message }));
+    }
+  });
+  return box;
 }
 
 // Links under an alert: mute similar alerts (medium alerts of a type that a mute can hide; high
@@ -1550,8 +1583,9 @@ function alertActions(r, withUser) {
   const person = r.user && r.user.includes("@");
   const links = [];
   if (person && r.severity !== "high" && muteTypes().some(([t]) => t === r.type)) {
-    const rule = r.type === "inbox_rule" && r.rule_name ? `:${encodePart(r.rule_name)}` : "";
-    links.push(h("a", { href: `#mute:${encodePart(r.type)}:${encodePart(r.user)}${rule}`, text: "Mute similar" }));
+    const parts = [r.type, r.user, r.type === "inbox_rule" ? r.rule_name || "" : "", r.asn || "", r.asn ? r.network || "" : ""];
+    while (parts.length > 2 && !parts[parts.length - 1]) parts.pop();
+    links.push(h("a", { href: `#mute:${parts.map(encodePart).join(":")}`, text: "Mute similar" }));
   }
   if (person && withUser) links.push(h("a", { href: userHash(r.user), text: "Respond on the user page" }));
   if (!links.length) return null;
@@ -1996,9 +2030,9 @@ function renderSearch() {
       h("div", { class: "chips", "aria-label": "Records by operation" },
         top.map(([op, n]) => h("span", { class: "chip", text: `${op}: ${n}` }))),
       ipLookupMeta(d.ip_info || {}),
-      table([["Time"], ["Operation"], ["Workload"], ["IP address", "mono"], ["Network"], ["Location"], ["Client or object"]],
+      table([["Time"], ["Operation"], ["Workload"], ["IP address", "mono"], ["Network"], ["Location"], ["Client"], ["Object"]],
         d.rows.map((row) => [timeCell(row.at), row.operation, row.workload, row.ip || "—",
-          ...ipCells(d.ip_info, row.ip), row.client || row.object || "—"])),
+          ...ipCells(d.ip_info, row.ip), row.client || "—", row.object || "—"])),
     ];
   }
   fill(root, body);
@@ -2187,13 +2221,17 @@ function userMutesCard(r) {
 let muteData = null;       // last /mutes response
 let mutePromise = null;    // request in progress
 let muteError = "";
-let muteForm = { type: "*", user: "", rule_name: "", days: "7", reason: "" };
+let muteForm = { type: "*", user: "", rule_name: "", asn: "", network: "", days: "7", reason: "" };
 let muteErrors = {};
 let muteNotice = null;     // {ok, text}
 
 function describeMute(m) {
-  return [muteTypeLabel(m.type), m.user === "*" ? "all users" : m.user, m.rule_name ? `rule "${m.rule_name}"` : null]
-    .filter(Boolean).join(", ");
+  return [muteTypeLabel(m.type), m.user === "*" ? "all users" : m.user, m.rule_name ? `rule "${m.rule_name}"` : null,
+    m.asn ? `network ${networkLabel(m)}` : null].filter(Boolean).join(", ");
+}
+
+function networkLabel(m) {
+  return m.asn ? (m.network ? `${m.network} (${m.asn})` : m.asn) : "";
 }
 
 function muteTypes() {
@@ -2201,7 +2239,7 @@ function muteTypes() {
 }
 
 function maxMuteDays() {
-  return (muteData && muteData.max_days) || 90;
+  return (muteData && muteData.max_days) || 3650;
 }
 
 function loadMutes() {
@@ -2220,7 +2258,7 @@ function loadMutes() {
   return mutePromise;
 }
 
-// Deep link "#mute:<type>:<upn>[:<rule>]" from a medium alert email: fill the form,
+// Deep link "#mute:<type>:<upn>[:<rule>[:<asn>[:<network>]]]" from a medium alert email: fill the form,
 // then move to it when the list is loaded (so that the page does not move after).
 function openMutes(parts) {
   if (parts) setMuteForm(parts);
@@ -2232,12 +2270,12 @@ function openMutes(parts) {
   loadMutes().then(() => { if (parts && currentView() === "mutes") focusMuteForm(); });
 }
 
-function setMuteForm([type, user, rule]) {
+function setMuteForm([type, user, rule, asn, network]) {
   muteErrors = {};
   muteNotice = null;
   const known = !type || type === "*" || muteTypes().some((t) => t[0] === type);
   muteForm = { type: known ? type || "*" : "*", user: user || "", rule_name: type === "inbox_rule" ? rule || "" : "",
-               days: "7", reason: "" };
+               asn: asn || "", network: asn ? network || "" : "", days: "7", reason: "" };
   if (!known) {
     muteErrors.type = typeLabels().has(type)
       ? `${typeLabel(type)}: this alert type cannot be muted. It is always high.`
@@ -2252,7 +2290,8 @@ function focusMuteForm() {
   document.getElementById(muteErrors.type ? "mute-type" : muteForm.user ? "mute-reason" : "mute-user").focus({ preventScroll: true });
 }
 
-const MUTE_FIELDS = { type: "mute-type", user: "mute-user", rule_name: "mute-rule", days: "mute-days", reason: "mute-reason" };
+const MUTE_FIELDS = { type: "mute-type", user: "mute-user", rule_name: "mute-rule", asn: "mute-asn", days: "mute-days",
+  reason: "mute-reason" };
 
 function formField(id, label, control, help, error, wide) {
   return h("div", { class: `form-field${wide ? " form-wide" : ""}${error ? " invalid" : ""}`, id: `${id}-field` },
@@ -2298,12 +2337,21 @@ function muteFormCard() {
   ruleField.hidden = muteForm.type !== "inbox_rule";
   return h("section", { class: "card", "aria-labelledby": "mute-form-title" },
     h("h2", { id: "mute-form-title", text: "Add a mute" }),
-    h("p", { class: "card-sub", text: "Select one alert type, one user, or both." }),
+    h("p", { class: "card-sub", text: "Select one alert type, one user, or both. Optional: one network (ASN)." }),
     h("form", { id: "mute-form", class: "form-grid", onsubmit: addMute },
       formField("mute-type", "Alert type", typeSelect, "Only types that can be medium. High alerts always send email.", muteErrors.type),
       formField("mute-user", "User", input("mute-user", "user", { type: "text", inputmode: "email", placeholder: "jane@contoso.com or *" }),
         "A user principal name, or * for all users.", muteErrors.user),
       ruleField,
+      formField("mute-asn", "Network (ASN)", input("mute-asn", "asn", { type: "text", maxlength: 16, placeholder: "AS63023",
+        oninput: (e) => {
+          set("asn")(e);
+          muteForm.network = "";
+          const help = document.getElementById("mute-asn-help");
+          if (help) help.textContent = "Optional. Mutes only alerts from IPs in this network. Empty: all networks.";
+        } }),
+        muteForm.asn && muteForm.network ? `Optional. ${muteForm.network}. Empty: all networks.`
+          : "Optional. Mutes only alerts from IPs in this network. Empty: all networks.", muteErrors.asn),
       formField("mute-days", "Days", input("mute-days", "days", { type: "number", inputmode: "numeric", min: 1, max: maxMuteDays(), step: 1, required: true }),
         `1 to ${maxMuteDays()} days.`, muteErrors.days),
       formField("mute-reason", "Reason", input("mute-reason", "reason", { type: "text", minlength: 3, maxlength: 200, required: true,
@@ -2313,13 +2361,14 @@ function muteFormCard() {
 
 function muteRows(rows, active) {
   const types = muteTypes();
-  const columns = [["Alert type", "primary"], ["User", "user"], ["Rule"], [active ? "Until" : "Ended", "nowrap"], ["Reason"], ["Added", "nowrap"]];
+  const columns = [["Alert type", "primary"], ["User", "user"], ["Rule"], ["Network"], [active ? "Until" : "Ended", "nowrap"], ["Reason"], ["Added", "nowrap"]];
   if (active) columns.push(["Action"]);
   return table(columns, rows.map((m) => {
     const cells = [
       muteTypeLabel(m.type, types),
       userLink(m.user),
       m.rule_name || "-",
+      networkLabel(m) || "-",
       active ? timeCell(m.until)
         : m.ended_at ? [h("span", { text: `Ended by ${m.ended_by || "unknown"}` }), h("span", { class: "sub", text: utc(m.ended_at) })]
           : [h("span", { text: "Expired" }), h("span", { class: "sub", text: utc(m.until) })],
@@ -2349,7 +2398,7 @@ function renderMutes() {
   fill(root,
     h("div", { class: "page-head" },
       h("h1", { text: "Mutes" }),
-      h("p", { class: "lead", text: `A mute stops email for medium alerts of one alert type, one user, or one inbox rule, for 1 to ${maxMuteDays()} days. High alerts always send email.` }),
+      h("p", { class: "lead", text: `A mute stops email for medium alerts of one alert type, one user, one inbox rule, or one network, for 1 to ${maxMuteDays()} days. High alerts always send email.` }),
       h("p", { class: "lead", text: "Muted alerts are still recorded. You see them on the user page and in Alerts. Each change is recorded in History and emailed to the alert mailbox." })),
     h("div", { class: "stack" },
       h("div", { id: "mute-out", "aria-live": "polite" },
@@ -2370,7 +2419,8 @@ async function addMute(e) {
   const button = e.submitter || document.getElementById("mute-add");
   const days = muteForm.days === "" ? null : Number(muteForm.days);
   const body = { action: "add", type: muteForm.type, user: muteForm.user.trim() || "*",
-    rule_name: muteForm.type === "inbox_rule" ? muteForm.rule_name.trim() : "", days, reason: muteForm.reason.trim() };
+    rule_name: muteForm.type === "inbox_rule" ? muteForm.rule_name.trim() : "", asn: muteForm.asn.trim(),
+    network: muteForm.asn.trim() ? muteForm.network : "", days, reason: muteForm.reason.trim() };
   const local = {};
   if (!muteForm.user.trim()) local.user = "Enter a user principal name, or * for all users.";
   else if (body.user !== "*" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.user)) {
@@ -2387,6 +2437,7 @@ async function addMute(e) {
         h("li", { text: `Alert type: ${muteTypeLabel(body.type)}` }),
         h("li", { text: `User: ${body.user === "*" ? "all users" : body.user}` }),
         body.rule_name ? h("li", { text: `Rule: ${body.rule_name}` }) : null,
+        body.asn ? h("li", { text: `Network: ${networkLabel(body)}` }) : null,
         h("li", { text: `For: ${plural(days || 0, "day")}${untilDate ? ` (until about ${untilDate})` : ""}` })),
       h("p", { class: "muted small", text: "High alerts still send email. Muted alerts are still recorded. The change is recorded in History and emailed to the alert mailbox." })],
     ok: "Add mute", danger: true });
@@ -2395,10 +2446,9 @@ async function addMute(e) {
   try {
     muteData = await api("/mutes", { method: "POST", body });
     muteErrors = {};
-    muteForm = { type: "*", user: "", rule_name: "", days: "7", reason: "" };
-    const added = muteData.mutes.find((m) => m.active && m.type === body.type && m.user === body.user.toLowerCase()
-      && m.rule_name === body.rule_name);
-    muteNotice = { ok: true, text: `Mute added: ${describeMute(body)}.${added ? ` It ends ${utc(added.until)}.` : ""}` };
+    muteForm = { type: "*", user: "", rule_name: "", asn: "", network: "", days: "7", reason: "" };
+    const added = muteData.added;
+    muteNotice = { ok: true, text: `Mute added: ${describeMute(added || body)}.${added ? ` It ends ${utc(added.until)}.` : ""}` };
     if (location.hash.startsWith("#mute:")) history.replaceState(null, "", "#mutes");
     renderMutes();
     focusMuteResult();

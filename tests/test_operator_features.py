@@ -204,7 +204,8 @@ class TestMutes:
         ({"type": "nope"}, "type"),
         ({"user": "not-an-address"}, "user"),
         ({"type": "mfa_change", "rule_name": "x"}, "rule_name"),
-        ({"days": 0}, "days"), ({"days": 91}, "days"), ({"days": True}, "days"),
+        ({"days": 0}, "days"), ({"days": 3651}, "days"), ({"days": True}, "days"),
+        ({"asn": "GTHost"}, "asn"),
         ({"reason": ""}, "reason"),
     ])
     def test_validation(self, over, field):

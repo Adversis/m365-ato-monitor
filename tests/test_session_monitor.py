@@ -135,6 +135,27 @@ class TestCheck:
         row = table.get_entity("session", SID)
         assert '"MS"' not in row["ips"] and '"IE"' in row["ips"]
 
+    def test_exchange_server_ip_is_not_a_second_country(self):
+        # Regression: an Outlook-iOS MailItemsAccessed record from an Exchange Online server IP
+        # (shape of a real record) made a high "second country" alert.
+        exo_ip = "2603:10b6:930:d1::7"
+        record = mail_access(exo_ip, 23)
+        record.update(Workload="Exchange", ClientInfoString="Client=OutlookService;Outlook-iOS/2.0;",
+                      AppId="27922004-5251-4030-b22d-91ecd9a37ea4",
+                      OperationProperties=[{"Name": "MailAccessType", "Value": "Bind"}])
+        data = dict(DATA, **{exo_ip: {"isocode": "CA", "asn": "AS8075", "organisation": "Microsoft Corporation"}})
+        lookup = Lookup(data)
+        assert sm.check(FakeTable(), [signin(HOME_IP, 1), record], lookup, NOW) == []
+        assert all(exo_ip not in call for call in lookup.calls)          # no lookup spent on it
+        # The same record from an Azure IP (customer space) still counts.
+        record.update(ClientIPAddress=MS_IP, ClientIP=MS_IP)
+        assert len(sm.check(FakeTable(), [signin(HOME_IP, 1), record], Lookup(), NOW)) == 1
+
+    def test_sign_in_from_exchange_server_range_is_kept(self):
+        exo_ip = "2603:10b6:930:d1::7"
+        data = dict(DATA, **{exo_ip: {"isocode": "CA", "asn": "AS8075", "organisation": "Microsoft Corporation"}})
+        assert len(sm.check(FakeTable(), [signin(HOME_IP, 1), signin(exo_ip, 2)], Lookup(data), NOW)) == 1
+
     def test_failed_lookup_retried(self):
         table = FakeTable()
         assert sm.check(table, [signin(HOME_IP, 1), signin(ABROAD_IP, 2)], Lookup({HOME_IP: DATA[HOME_IP]}), NOW) == []

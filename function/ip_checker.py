@@ -96,6 +96,16 @@ def is_allowed_ip(ip: str) -> bool:
 _IP_FIELDS = ("ClientIP", "ClientIPAddress", "ActorIpAddress", "ActorIP")
 
 
+def network_fields(ip_data: Optional[dict]) -> dict:
+    """{"asn": "AS1234", "network": "Name"} for findings (mutes, journal).
+
+    ``ip_data`` is a proxycheck.io answer or an analyze_ip result (``org`` for the organisation).
+    """
+    data = ip_data or {}
+    names = [str(data.get(k) or "").strip() for k in ("organisation", "org", "provider")]
+    return {"asn": config.normalize_asn(data.get("asn")), "network": next((n for n in names if n and n != "Unknown"), "")}
+
+
 def extract_ip(event: dict) -> Optional[str]:
     """Return the first field that holds a valid IP address, in canonical form."""
     candidates = [event.get(f) for f in _IP_FIELDS]

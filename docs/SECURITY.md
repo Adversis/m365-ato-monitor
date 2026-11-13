@@ -46,7 +46,7 @@ Protections:
 | Recipients changed | The alert mailbox, extra recipients, and the tenant name are UI settings. Each change is recorded in History and emailed. A new alert mailbox must pass a test send before the save, and the old address gets a notice. The Graph permissions are set by `install.ps1`, not in the UI. |
 | Invalid values | The server validates every value (types, ranges, addresses, country codes, ASNs, alert types). A setting that needs a missing Graph permission is refused. |
 | Detection turned down | Alert types off, allowed IPs, and allowed networks ask for confirmation in the UI, are recorded in History, and are emailed. |
-| Alerts muted | A mute hides medium alerts only, for at most 90 days, and needs a reason. Each mute is recorded in History and emailed. Muted alerts are still in the findings journal. The weekly and monthly reports list the active mutes. |
+| Alerts muted | A mute hides medium alerts only, for at most 3650 days, and needs a reason. A mute can be limited to one network (ASN). Each mute is recorded in History and emailed. Muted alerts are still in the findings journal. The weekly and monthly reports list the active mutes. |
 | Accounts changed from the UI | The user page can revoke sessions, block or unblock sign-in, and turn inbox rules off or on, only as far as the app's Graph permissions allow. It refuses to block the alert mailbox and the admin's own account. Graph refuses changes to admin accounts. Each action is recorded in History and emailed. |
 
 If you set a webhook, alerts (user names, IP addresses, and the alert text, not the raw audit record) go to that service. The monitor posts over HTTPS only, does not follow redirects, and refuses a host that resolves to a private, loopback, link-local, or reserved address. The webhook URL is stored as a secret in Table Storage.
@@ -172,7 +172,7 @@ The November 2026 review fixed:
 A further November 2026 review fixed:
 
 - Wrong-password attempts could revoke sessions or block the named account when failed-sign-in email and automatic response were both on. The responder now requires proof of the password for failed sign-ins, regardless of the email setting.
-- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes Exchange Graph REST service records only with both the client marker and Graph resource ID.
+- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes Exchange Graph REST service records only with both the client marker and Graph resource ID, and Exchange records from Exchange Online server prefixes that are in no Azure service tag (`EXCHANGE_SERVER_NETS`, checked monthly in CI).
 - X.500 forwarding recipients were assumed to be internal. A directory contact can deliver externally. The audit rule detector and inbox rule sweep now flag unresolved recipients for verification. An unverified recipient alone is medium and gets no automatic response.
 
 `tests/test_security_regressions.py` covers these cases, their controls, and migration of saved session data.

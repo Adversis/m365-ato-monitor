@@ -97,6 +97,15 @@ class TestCheck:
         found, looked = _check([graph_read()], {"40.126.24.24": VPN})
         assert found == [] and looked == []
 
+    def test_exchange_server_ip_is_skipped(self):
+        exo_ip = "2603:10b6:930:d1::7"
+        record = owa_read(ip=exo_ip)
+        record["ClientInfoString"] = "Client=OutlookService;Outlook-iOS/2.0;"
+        found, looked = _check([record], {exo_ip: ABROAD})
+        assert found == [] and looked == []
+        assert mail_access.exchange_server_ip(exo_ip) and not mail_access.exchange_server_ip("2603:1036::1")
+        assert not mail_access.exchange_server_ip("not an ip")
+
     def test_ip_that_signed_in_is_skipped(self):
         found, looked = _check([owa_read()], {"81.2.69.160": VPN}, known=lambda u, ip: True)
         assert found == [] and looked == []

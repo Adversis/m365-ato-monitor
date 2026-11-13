@@ -28,7 +28,10 @@ finding still alerts after a medium finding was sent or muted.
 
 Only clients that show the user's own IP count: Outlook on the web, Outlook
 desktop (MAPI), Outlook mobile, Exchange ActiveSync, EWS, IMAP, and POP.
-Graph (Client=REST) records carry a Microsoft IP and are skipped.
+Graph (Client=REST) records carry a Microsoft IP and are skipped. Records
+from an Exchange Online server IP (EXCHANGE_SERVER_NETS) are also skipped:
+Outlook mobile syncs through a Microsoft service, and some of its records
+show the server's IP instead of the phone's.
 
 Storage: table "processedevents", partition "system", one row per UTC day
 of the records' CreationTime ("mailaccess-YYYY-MM-DD"), kept KEEP_DAYS days;
@@ -39,6 +42,7 @@ more than once); partition "signinip", one row per user and sign-in IP
 """
 
 import hashlib
+import ipaddress
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
@@ -46,7 +50,7 @@ from typing import Callable, Optional
 from azure.core.exceptions import ResourceNotFoundError
 from azure.data.tables import UpdateMode
 
-from ip_checker import extract_ip
+from ip_checker import extract_ip, network_fields
 
 _PARTITION = "system"
 _PREFIX = "mailaccess-"
@@ -60,6 +64,30 @@ REAL_IP_CLIENTS = ("client=owa", "client=msexchangerpc", "client=outlookservice"
                    "client=webservices", "client=imap4", "client=pop3")
 _GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 MAX_SUBJECTS = 3
+
+# Address space of Exchange Online's own servers. An Exchange record from one of these IPs was
+# written by a Microsoft service that acts for the user (for example the Outlook mobile sync
+# service). It does not show where the user or an attacker is.
+#
+# Microsoft does not publish this list. Add a prefix only after it shows up in a real record, and
+# only if it is in neither the Office 365 endpoints list nor an Azure service tag (customer Azure
+# space). scripts/check_exchange_nets.py checks this every month in CI
+# (.github/workflows/exchange-nets.yml).
+#
+# 2603:10b6::/32: Exchange Online servers in North America (it is in the Received headers of NAM
+# mail). Seen as the ClientIPAddress of Outlook-iOS MailItemsAccessed records, November 2026.
+EXCHANGE_SERVER_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "2603:10b6::/32",
+))
+
+
+def exchange_server_ip(ip) -> bool:
+    """True if ``ip`` is in EXCHANGE_SERVER_NETS."""
+    try:
+        addr = ipaddress.ip_address(str(ip or "").strip())
+    except ValueError:
+        return False
+    return any(addr.version == net.version and addr in net for net in EXCHANGE_SERVER_NETS)
 
 
 def _properties(record: dict) -> dict:
@@ -269,10 +297,12 @@ def real_ip_client(record: dict) -> bool:
 
 
 def service_ip_client(record: dict) -> bool:
-    """An Exchange Graph REST record whose IP belongs to the service, not the client.
+    """An Exchange record whose IP belongs to the service, not the client.
 
     Network ownership alone cannot establish this: Azure hosts customer VMs.
-    Require both the REST client marker and the Graph resource ID. Sign-in
+    Two cases count: a Graph REST record (the REST client marker and the Graph
+    resource ID), and a record from an Exchange Online server IP
+    (EXCHANGE_SERVER_NETS, which is not customer Azure space). Sign-in
     records always show the sign-in source and must not be excluded here.
     """
     operation = record.get("Operation")
@@ -280,6 +310,8 @@ def service_ip_client(record: dict) -> bool:
         return False
     if record.get("Workload") != "Exchange" and operation not in (READ, SEND):
         return False
+    if exchange_server_ip(extract_ip(record)):
+        return True
     client = str(record.get("ClientInfoString") or "").split(";")[0].strip().lower()
     ctx = record.get("AppAccessContext")
     api_id = ctx.get("APIId") if isinstance(ctx, dict) else ""
@@ -291,7 +323,8 @@ def observations(records: list) -> dict:
     """Mail access records grouped by (user, IP): counts, first and last time, sent subjects."""
     groups = {}
     for r in records:
-        if not isinstance(r, dict) or r.get("Operation") not in (READ, SEND) or not real_ip_client(r):
+        if (not isinstance(r, dict) or r.get("Operation") not in (READ, SEND) or not real_ip_client(r)
+                or service_ip_client(r)):
             continue
         user, ip = _user(r), extract_ip(r)
         if "@" not in user or not ip:
@@ -420,6 +453,7 @@ def check(records: list, lookup: Callable[[list], dict], analyze: Callable[[dict
         else:
             continue
         finding = _finding(g, why, analysis, cc)
+        finding.update(network_fields(data))
         if finding["severity"] == "high":
             # The medium key may already be muted. Give an escalation its own
             # delivery key and journal row, then suppress further daily repeats.

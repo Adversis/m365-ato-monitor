@@ -68,7 +68,7 @@ class TestTriage:
     def test_install_rows_cannot_be_triaged(self, ui_on):
         jt = FakeTable()
         _seed(jt, 1, status="install")
-        (pk, rk), = jt.rows.keys()
+        (pk, rk), = [k for k in jt.rows if k[0].startswith("u-")]
         with patch("journal.table_client", return_value=jt):
             assert _triage({"id": f"{pk}|{rk}", "state": "benign"})[0] == 404
 
