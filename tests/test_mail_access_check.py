@@ -103,8 +103,16 @@ class TestCheck:
         record["ClientInfoString"] = "Client=OutlookService;Outlook-iOS/2.0;"
         found, looked = _check([record], {exo_ip: ABROAD})
         assert found == [] and looked == []
-        assert mail_access.exchange_server_ip(exo_ip) and not mail_access.exchange_server_ip("2603:1036::1")
-        assert not mail_access.exchange_server_ip("not an ip")
+
+    def test_teams_meeting_prep_read_is_skipped(self):
+        # Regression: Teams meeting prep read an attachment with the user's token from an Exchange Online
+        # front-end IP (in the Office 365 endpoints list, in no Azure service tag).
+        ip = "2603:1036:303:2832::5"
+        record = owa_read(ip=ip)
+        record.update(ClientInfoString="Client=REST;;", AppId="66a88757-258c-4c72-893c-3e8bed4d6899",
+                      ActorInfoString="Client=REST;search-recommendations-teams-meetingprep[AppId=66a88757];")
+        found, looked = _check([record], {ip: VPN})
+        assert found == [] and looked == []
 
     def test_ip_that_signed_in_is_skipped(self):
         found, looked = _check([owa_read()], {"81.2.69.160": VPN}, known=lambda u, ip: True)

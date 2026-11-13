@@ -244,7 +244,8 @@ def get_state(req: func.HttpRequest) -> func.HttpResponse:
     granted = token_manager.granted_graph_roles()
     health = fa._runtime_state(events_table, now, ip_cache_table)
     health["graph_roles"] = granted
-    week, week_totals = journal.window(journal.table_client(), now - timedelta(days=7), limit=50)
+    week, week_totals = journal.window(journal.table_client(), now - timedelta(days=7), limit=50,
+                                       keep=lambda r: r["status"] not in NOT_ON_MAIN)
     return _json({
         "user": user["name"],
         "me": {"name": user.get("display") or user["name"], "upn": user.get("upn") or "",
@@ -446,7 +447,7 @@ def user_page(req: func.HttpRequest) -> func.HttpResponse:
     return _json({
         "user": upn,
         "account": responder.account_state(upn, granted),
-        "findings": journal.for_user(journal.table_client(), upn, journal.ANY_TIME, limit=200),
+        "findings": _fill_networks(journal.for_user(journal.table_client(), upn, journal.ANY_TIME, limit=200)),
         "countries": geo_monitor.user_countries(geo_monitor.table_client(), upn, now),
         "mutes": mutes,
         "exempt": upn in config.ANOMALY_ACTION_EXEMPT or upn == (config.ADMIN_EMAIL or "").lower(),
@@ -591,21 +592,85 @@ def findings(req: func.HttpRequest) -> func.HttpResponse:
     # page apply to these rows; the summary counts all rows of the period.
     rows, totals = journal.window(
         journal.table_client(), datetime.now(timezone.utc) - timedelta(days=days), limit=WINDOW_MAX,
-        keep=lambda r: (not ftype or r["type"] == ftype) and (not status or r["status"] == status))
+        keep=lambda r: (r["status"] not in NOT_ON_MAIN and (not ftype or r["type"] == ftype)
+                        and (not status or r["status"] == status)))
     want = _TRIAGE_FILTERS[triage]
     chosen = [r for r in rows if want is None or r["triage"] in want]
     start = (page - 1) * size
-    return _json({"days": days, "summary": totals, "findings": chosen[start:start + size],
+    return _json({"days": days, "summary": totals, "findings": _fill_networks(chosen[start:start + size]),
                   "page": page, "size": size, "count": len(chosen), "capped": totals["total"] > len(rows)})
 
 
 PAGE_SIZE = 50
 PAGE_MAX = 200
+# Rows that the Overview and the Alerts page do not show: the alert type is off, so no one acts on
+# them (for example failed sign-ins). The user page still shows them.
+NOT_ON_MAIN = ("alert off",)
 WINDOW_MAX = 2000
 # triage filter -> the triage states it shows (None: all).
 _TRIAGE_FILTERS = {"": None, "open": journal.OPEN, "investigating": ("investigating",),
                    "benign": ("benign",), "resolved": ("resolved",)}
 TRIAGE_LABELS = {"": "Open", "investigating": "Investigating", "benign": "Benign", "resolved": "Resolved"}
+
+
+def _public_ip(raw) -> str:
+    """The IP in canonical form if it is public and not allowed, else ""."""
+    from ip_checker import clean_ip, is_allowed_ip, is_private_ip
+    ip = clean_ip(str(raw or ""))
+    return ip if ip and not is_private_ip(ip) and not is_allowed_ip(ip) else ""
+
+
+def _fill_networks(rows: list) -> list:
+    """Give rows without an ASN (alerts recorded before the journal kept it) the ASN and network
+    name of their IP from the IP cache. No proxycheck.io query. The cache keeps a flagged answer
+    for 24 hours and a clean one for IP_CACHE_DAYS."""
+    from function_app import _get_table_clients
+    from ip_checker import check_ips_batch, network_fields
+    want = {}
+    for r in rows:
+        ip = "" if r.get("asn") else _public_ip(r.get("ip"))
+        if ip:
+            want.setdefault(ip, []).append(r)
+    if not want:
+        return rows
+    try:
+        _, cache = _get_table_clients()
+        found = check_ips_batch(list(want), cache, cache_only=True) if cache is not None else {}
+    except Exception as e:
+        logging.warning(f"Alert networks not read from the IP cache: {type(e).__name__}")
+        return rows
+    for ip, data in found.items():
+        fields = network_fields(data)
+        for r in want.get(ip, []):
+            if fields["asn"]:
+                r.update(fields)
+    return rows
+
+
+def ip_network(req: func.HttpRequest) -> func.HttpResponse:
+    """GET ?ip=: {"asn", "network", "note"} of one IP, for "Mute similar" on an alert without an ASN.
+
+    The IP cache first. Else one proxycheck.io query, unless the quota is low, used up, or
+    refused. ``note``: "" (found), "private", "quota", or "failed".
+    """
+    user = guard(req)
+    if isinstance(user, func.HttpResponse):
+        return user
+    import proxycheck_quota
+    from function_app import _get_table_clients
+    from ip_checker import check_ips_batch, network_fields
+    ip = _public_ip(req.params.get("ip"))
+    if not ip:
+        return _json({"asn": "", "network": "", "note": "private"})
+    _, cache = _get_table_clients()
+    found = check_ips_batch([ip], cache, cache_only=True)
+    if ip not in found:
+        level = proxycheck_quota.status(cache)["level"] if cache is not None else "unknown"
+        if level in ("low", "exhausted", "refused"):
+            return _json({"asn": "", "network": "", "note": "quota"})
+        found = check_ips_batch([ip], cache)
+    fields = network_fields(found.get(ip))
+    return _json(dict(fields, note="" if fields["asn"] else "failed"))
 
 
 def finding_record(req: func.HttpRequest) -> func.HttpResponse:

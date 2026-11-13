@@ -62,6 +62,8 @@ The Alerts view shows open and investigating alerts first; select **Triage** > *
 
 The Overview shows the state as a tag on each recent alert (**Investigating**, **Benign**, or **Resolved**), with the note. Benign and resolved alerts are dimmed. An automatic response shows as "Response: ..." under the alert.
 
+A muted alert shows as **Benign** ("a mute applies") until an admin selects another state. Muted alerts, and alerts that Microsoft's own services caused, are dimmed. Alerts of a type that is off (for example failed sign-ins, when **Email failed sign-ins** is off) are not on the Overview or the Alerts view: open the user page to see them.
+
 Under each alert, **Mute similar** (medium alerts only) opens the mute form with the alert type, the user, and the rule name filled in. **Respond on the user page** opens the page with revoke sessions, block sign-in, and the user's inbox rules.
 
 ---
@@ -75,7 +77,7 @@ A mute stops email for medium alerts that match it, for 1 to 3650 days. Use it f
    - **Alert type**: one type, or all types that can be muted.
    - **User**: one user, or `*` for all users. A mute for all users must name one alert type.
    - **Rule name** (inbox rules only): one rule.
-   - **Network (ASN)**: optional. The mute then hides only alerts from IPs in that network, for example `AS63023` (GTHost). **Mute similar** fills it from the alert.
+   - **Network (ASN)**: optional. The mute then hides only alerts from IPs in that network, for example `AS63023` (GTHost). **Mute similar** fills it from the alert. For an alert recorded before the monitor kept the ASN, it uses the IP cache, or looks up the alert IP once (one proxycheck.io query; none when the quota is low).
 3. Set **Days** (1–3650). Use the shortest time that covers the case.
 4. Enter a **Reason**. It is shown in History, in the email about the change, and in the weekly report.
 5. Select **Add mute**, then confirm.

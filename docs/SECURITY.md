@@ -172,7 +172,7 @@ The November 2026 review fixed:
 A further November 2026 review fixed:
 
 - Wrong-password attempts could revoke sessions or block the named account when failed-sign-in email and automatic response were both on. The responder now requires proof of the password for failed sign-ins, regardless of the email setting.
-- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes Exchange Graph REST service records only with both the client marker and Graph resource ID, and Exchange records from Exchange Online server prefixes that are in no Azure service tag (`EXCHANGE_SERVER_NETS`, checked monthly in CI).
+- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes Exchange Graph REST service records only with both the client marker and Graph resource ID, and records (not sign-ins) from Microsoft 365 server ranges: the Office 365 endpoints list minus every Azure service tag range, so no Azure customer space (`microsoft_nets.py`, checked monthly in CI).
 - X.500 forwarding recipients were assumed to be internal. A directory contact can deliver externally. The audit rule detector and inbox rule sweep now flag unresolved recipients for verification. An unverified recipient alone is medium and gets no automatic response.
 
 `tests/test_security_regressions.py` covers these cases, their controls, and migration of saved session data.

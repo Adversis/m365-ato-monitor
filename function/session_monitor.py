@@ -25,9 +25,9 @@ Not detected: records without a session ID (about half of workload records,
 for example Outlook desktop and some API access), and an attacker on a
 normal network in the same country (AiTM kits often use a residential proxy
 in the victim's country). Exchange Graph REST records show a service IP and
-are ignored when the record identifies that API and client. Exchange records
-from an Exchange Online server IP (mail_access.EXCHANGE_SERVER_NETS) are
-ignored too. Microsoft-owned
+are ignored when the record identifies that API and client. Records (not
+sign-ins) from a Microsoft 365 server IP (microsoft_nets.py) are ignored
+too. Other Microsoft-owned
 networks also host customer VMs and are checked. Allowlisted IPs are ignored.
 
 Microsoft's AiTM hunting guidance uses the same join (SessionId, different
@@ -240,7 +240,7 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
         usual = _usual(geo_table, row["user"] or user, cc, now)
         gap = _minutes_between(prev["last"], when)
         gap_text = f" {gap} minutes later" if gap is not None and gap >= 0 else ""
-        org = data.get("organisation") or data.get("provider") or "unknown network"
+        org = _network_text(data)
         findings.append({
             "type": "session_reuse",
             "severity": "medium" if usual else "high",
@@ -338,7 +338,7 @@ def _network_finding(sid: str, user: str, ip: str, cc: str, normal: str, analysi
                      record: dict) -> dict:
     """A session that started on a normal network and moved to a risky IP in the same country."""
     kind = analysis.get("proxy_type") or ", ".join(analysis.get("flags") or []) or "suspicious"
-    org = data.get("organisation") or data.get("provider") or "unknown network"
+    org = _network_text(data)
     return {
         "type": "session_reuse",
         "severity": "high" if analysis.get("confidence") == "high" else "medium",
@@ -357,6 +357,16 @@ def _network_finding(sid: str, user: str, ip: str, cc: str, normal: str, analysi
         "ip_context": f"Session first seen from {normal}; now from a {kind} IP in {cc} ({org})",
         **network_fields(data),
     }
+
+
+def _network_text(data: dict) -> str:
+    """The network, risk score, and place of an IP: "Microsoft Corporation, risk 33/100, Ashburn, Virginia"."""
+    parts = [data.get("organisation") or data.get("provider") or "unknown network"]
+    risk = data.get("risk")
+    if risk not in (None, ""):
+        parts.append(f"risk {risk}/100")
+    parts += [str(data[k]) for k in ("city", "region") if data.get(k) and data.get(k) != "Unknown"]
+    return ", ".join(parts)
 
 
 def mark_alerted(table, sid: str, cc: str, now: datetime) -> None:

@@ -151,6 +151,36 @@ class TestCheck:
         record.update(ClientIPAddress=MS_IP, ClientIP=MS_IP)
         assert len(sm.check(FakeTable(), [signin(HOME_IP, 1), record], Lookup(), NOW)) == 1
 
+    def test_microsoft_service_ip_is_not_a_risky_move(self):
+        # Regression: Teams meeting prep read an attachment with the user's session from an Exchange Online
+        # front-end IP (Office 365 endpoints list, in no Azure service tag): a "VPN IP" session alert.
+        from ip_checker import analyze_ip
+        ip = "2603:1036:303:2832::5"
+        record = mailbox(ip, 29, op="AttachmentAccess")
+        record.update(Workload="Exchange", ClientInfoString="Client=REST;;",
+                      AppId="66a88757-258c-4c72-893c-3e8bed4d6899",
+                      ActorInfoString="Client=REST;search-recommendations-teams-meetingprep[AppId=66a88757];")
+        data = dict(DATA, **{ip: {"isocode": "US", "asn": "AS8075", "organisation": "Microsoft Corporation",
+                                  "proxy": "yes", "type": "VPN", "risk": 33}})
+        lookup = Lookup(data)
+        assert sm.check(FakeTable(), [signin(HOME_IP, 1), record], lookup, NOW, analyze=analyze_ip) == []
+        assert all(ip not in call for call in lookup.calls)
+        # A SharePoint record from the same range is skipped too; a sign-in from it is not.
+        record.update(Workload="SharePoint", Operation="FileAccessed", RecordType=6)
+        assert sm.observations([record]) == []
+        assert sm.observations([signin(ip, 30)])
+
+    def test_description_has_risk_and_place(self):
+        from ip_checker import analyze_ip
+        data = dict(DATA, **{VPN_IP: dict(DATA[VPN_IP], city="Ashburn", region="Virginia")})
+        f = sm.check(FakeTable(), [signin(HOME_IP, 1), mailbox(VPN_IP, 20)], Lookup(data), NOW,
+                     analyze=analyze_ip)[0]
+        assert "a VPN IP (M247 Europe, risk 66/100, Ashburn, Virginia)" in f["description"]
+        assert f["ip_context"].endswith("(M247 Europe, risk 66/100, Ashburn, Virginia)")
+        f = sm.check(FakeTable(), [signin(HOME_IP, 1), signin(ABROAD_IP, 2)],
+                     Lookup(dict(DATA, **{ABROAD_IP: dict(DATA[ABROAD_IP], risk=0, city="Amsterdam")})), NOW)[0]
+        assert "(IP 45.33.1.2, Akamai Connected Cloud, risk 0/100, Amsterdam)" in f["description"]
+
     def test_sign_in_from_exchange_server_range_is_kept(self):
         exo_ip = "2603:10b6:930:d1::7"
         data = dict(DATA, **{exo_ip: {"isocode": "CA", "asn": "AS8075", "organisation": "Microsoft Corporation"}})
@@ -196,9 +226,9 @@ class TestRiskyNetworkSameCountry:
         f = findings[0]
         assert f["type"] == "session_reuse" and f["severity"] == "medium" and f["ip"] == VPN_IP
         assert f["country"] == "US" and f["mark"] == sm.NETWORK_MARK
-        assert f"used from IP {HOME_IP} and then from {VPN_IP}, a VPN IP (M247 Europe)" in f["description"]
+        assert f"used from IP {HOME_IP} and then from {VPN_IP}, a VPN IP (M247 Europe, risk 66/100)" in f["description"]
         assert "same country (US)" in f["description"] and "MoveToDeletedItems" in f["description"]
-        assert f["ip_context"] == f"Session first seen from {HOME_IP}; now from a VPN IP in US (M247 Europe)"
+        assert f["ip_context"] == f"Session first seen from {HOME_IP}; now from a VPN IP in US (M247 Europe, risk 66/100)"
 
     def test_tor_is_high(self):
         assert self._check([signin(HOME_IP, 1), mailbox(TOR_IP, 20)])[0]["severity"] == "high"

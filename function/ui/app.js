@@ -312,10 +312,11 @@ function same(a, b) {
 }
 
 // A table that becomes stacked rows on a phone. columns: [label, cellClass]; rows: [[cell, ...], ...].
-function table(columns, rows) {
+// rowClass: optional (row index) -> class of the <tr>.
+function table(columns, rows, rowClass) {
   return h("div", { class: "table-wrap" }, h("table", { class: "list rows" },
     h("thead", {}, h("tr", {}, columns.map(([label]) => h("th", { scope: "col", text: label })))),
-    h("tbody", {}, rows.map((cells) => h("tr", {}, cells.map((cell, i) => {
+    h("tbody", {}, rows.map((cells, n) => h("tr", { class: rowClass ? rowClass(n) || null : null }, cells.map((cell, i) => {
       const [label, cls] = columns[i];
       return h("td", { class: cls || null, "data-label": label }, h("span", { class: "cell" }, cell));
     }))))));
@@ -677,13 +678,13 @@ function tally(summary) {
 }
 
 function alertFeed(rows) {
-  return h("ul", { class: "feed" }, rows.map((r) => h("li", { class: `feed-item${CLOSED.includes(r.triage) ? " is-closed" : ""}` },
+  return h("ul", { class: "feed" }, rows.map((r) => h("li", { class: `feed-item${isQuiet(r) ? " is-closed" : ""}` },
     h("div", { class: "feed-main" },
       h("div", { class: "feed-title" }, severityPill(r.severity), h("strong", { text: typeLabel(r.type) })),
       h("div", { class: "feed-user" }, userLink(r.user)),
       r.description ? h("p", { class: "feed-desc", text: r.description }) : null,
       r.action && r.status === "emailed" ? h("p", { class: "feed-desc muted", text: `Response: ${r.action}` }) : null,
-      r.triage_by ? h("p", { class: "feed-desc muted", text: triageText(r) }) : null),
+      r.triage_by || autoBenign(r) ? h("p", { class: "feed-desc muted", text: triageText(r) }) : null),
     h("div", { class: "feed-meta" }, statusPill(r.status), triageTag(r),
       h("time", { datetime: r.at, title: utc(r.at), text: ago(r.at) }),
       r.repeats ? h("span", { class: "muted small", title: r.last_repeat ? `Last: ${utc(r.last_repeat)}` : "",
@@ -692,6 +693,12 @@ function alertFeed(rows) {
 
 // The triage state on the Overview: a tag for Investigating, Benign, and Resolved. Open has none.
 const CLOSED = ["benign", "resolved"];
+// Rows that sent no email because an admin decided so (a mute, an alert type off) or because a
+// Microsoft service made the change. They are shown greyed out.
+const QUIET = ["muted", "alert off", "microsoft"];
+const isQuiet = (r) => QUIET.includes(r.status) || CLOSED.includes(r.triage);
+// A muted row that no admin triaged reads as Benign (the server sets it): say why.
+const autoBenign = (r) => r.status === "muted" && r.triage === "benign" && !r.triage_by;
 
 function triageTag(r) {
   if (!r.triage || !TRIAGE[r.triage]) return null;
@@ -700,6 +707,7 @@ function triageTag(r) {
 }
 
 function triageText(r) {
+  if (autoBenign(r)) return "Benign: a mute applies";
   return `${TRIAGE[r.triage || ""][1]} by ${r.triage_by}, ${ago(r.triage_at)}` + (r.triage_note ? `: ${r.triage_note}` : "");
 }
 
@@ -1526,6 +1534,9 @@ let alertsError = "";
 let alertsLoading = false;
 let alertsSeq = 0;
 
+// The label of a row's action text: what the monitor did, or why it sent no email.
+const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No email" };
+
 function findingsTable(rows, withUser, onTriaged) {
   const columns = [["Time", "nowrap"], ...(withUser ? [["User", "user"]] : []), ["Alert", "primary"], ["Severity", "nowrap"],
                    ["Email", "nowrap"], ["Triage", "nowrap"], ["Description"]];
@@ -1538,12 +1549,13 @@ function findingsTable(rows, withUser, onTriaged) {
     triageCell(r, onTriaged),
     [h("span", { text: r.description || "" }),
      r.ip_context ? h("span", { class: "sub", text: `IP: ${r.ip_context}` }) : null,
+     r.asn ? h("span", { class: "sub", text: `Network: ${networkLabel(r)}` }) : null,
      r.client ? h("span", { class: "sub", text: `Client: ${r.client}` }) : null,
-     r.action ? h("span", { class: "sub", text: `Response: ${r.action}` }) : null,
-     r.triage_by ? h("span", { class: "sub", text: triageText(r) }) : null,
+     r.action ? h("span", { class: "sub", text: `${ACTION_LABELS[r.status] || "Response"}: ${r.action}` }) : null,
+     r.triage_by || autoBenign(r) ? h("span", { class: "sub", text: triageText(r) }) : null,
      alertActions(r, withUser),
      auditRecord(r)],
-  ]));
+  ]), (n) => isQuiet(rows[n]) ? "is-quiet" : "");
 }
 
 // The audit record of an alert, as the alert email shows it. Loaded when the section opens.
@@ -1583,9 +1595,15 @@ function alertActions(r, withUser) {
   const person = r.user && r.user.includes("@");
   const links = [];
   if (person && r.severity !== "high" && muteTypes().some(([t]) => t === r.type)) {
-    const parts = [r.type, r.user, r.type === "inbox_rule" ? r.rule_name || "" : "", r.asn || "", r.asn ? r.network || "" : ""];
-    while (parts.length > 2 && !parts[parts.length - 1]) parts.pop();
-    links.push(h("a", { href: `#mute:${parts.map(encodePart).join(":")}`, text: "Mute similar" }));
+    const href = (asn, network) => {
+      const parts = [r.type, r.user, r.type === "inbox_rule" ? r.rule_name || "" : "", asn || "", asn ? network || "" : ""];
+      while (parts.length > 2 && !parts[parts.length - 1]) parts.pop();
+      return `#mute:${parts.map(encodePart).join(":")}`;
+    };
+    const link = h("a", { href: href(r.asn, r.network), text: "Mute similar" });
+    // An alert recorded before the journal kept the ASN: look up its IP first (cache, else one query).
+    if (!r.asn && r.ip) link.addEventListener("click", (e) => muteSimilarLookup(e, r, href));
+    links.push(link);
   }
   if (person && withUser) links.push(h("a", { href: userHash(r.user), text: "Respond on the user page" }));
   if (!links.length) return null;
@@ -1668,13 +1686,15 @@ function renderAlerts() {
   fill(root,
     h("div", { class: "page-head" },
       h("h1", { text: "Alerts" }),
-      h("p", { class: "lead", text: "Each detection of the monitor, newest first. The list also shows detections that sent no email: the alert type is off, a mute applies, or the onboarding scan found it. Set an alert to Benign or Resolved when you are done with it." })),
+      h("p", { class: "lead", text: "Each detection of the monitor, newest first. The list also shows detections that sent no email because a mute applies (greyed out, Benign) or the onboarding scan found it. Detections of an alert type that is off are only on the user page. Set an alert to Benign or Resolved when you are done with it." })),
     h("section", { class: "card", "aria-label": "Filters" },
       h("div", { class: "filters" },
         select("alerts-days", "Period", alertsFilter.days, [["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 90 days"]], "days"),
         select("alerts-type", "Alert type", alertsFilter.type, [["", "All types"], ...types], "type"),
         select("alerts-triage", "Triage", alertsFilter.triage, TRIAGE_FILTERS, "triage"),
-        select("alerts-status", "Email", alertsFilter.status, [["", "All"], ...Object.entries(STATUS_PILLS).map(([s, [, l]]) => [s, l])], "status")),
+        // "Alert off" rows are only on the user page.
+        select("alerts-status", "Email", alertsFilter.status, [["", "All"], ...Object.entries(STATUS_PILLS)
+          .filter(([s]) => s !== "alert off").map(([s, [, l]]) => [s, l])], "status")),
       data && !alertsError ? h("div", { class: "more" }, tally(data.summary),
         triageCounts.length ? h("p", { class: "muted small", text: "Triage: " + triageCounts.map(([s, n]) =>
           `${n} ${(TRIAGE[s === "open" ? "" : s] || [, s])[1].toLowerCase()}`).join(", ") }) : null) : null),
@@ -2218,12 +2238,39 @@ function userMutesCard(r) {
 // Mutes
 // ---------------------------------------------------------------------------
 
+// "Mute similar" on an alert without an ASN: find the network of its IP, then open the form.
+async function muteSimilarLookup(e, r, href) {
+  e.preventDefault();
+  if (r.asn) { location.hash = href(r.asn, r.network); return; }   // looked up on an earlier click
+  const link = e.currentTarget;
+  if (link.getAttribute("aria-busy") === "true") return;
+  link.setAttribute("aria-busy", "true");
+  let info = { asn: "", network: "", note: "failed" };
+  try {
+    info = await api(`/ipnetwork?ip=${encodeURIComponent(r.ip)}`);
+  } catch (err) {
+    if (err instanceof SessionError) { handleError(err); return; }
+  } finally {
+    link.removeAttribute("aria-busy");
+  }
+  if (!info.asn) {
+    muteHint = {
+      private: "The alert IP is private or allowed: the mute applies to all networks.",
+      quota: "The network of the alert IP is not known: the proxycheck.io quota is low. Enter an ASN, or leave it empty for all networks.",
+    }[info.note] || `The network of ${r.ip} was not found. Enter an ASN, or leave it empty for all networks.`;
+  }
+  r.asn = info.asn || "";
+  r.network = info.network || "";
+  location.hash = href(r.asn, r.network);
+}
+
 let muteData = null;       // last /mutes response
 let mutePromise = null;    // request in progress
 let muteError = "";
 let muteForm = { type: "*", user: "", rule_name: "", asn: "", network: "", days: "7", reason: "" };
 let muteErrors = {};
-let muteNotice = null;     // {ok, text}
+let muteNotice = null;     // {ok, text, kind}
+let muteHint = "";         // shown when the next deep link opens the form
 
 function describeMute(m) {
   return [muteTypeLabel(m.type), m.user === "*" ? "all users" : m.user, m.rule_name ? `rule "${m.rule_name}"` : null,
@@ -2272,7 +2319,8 @@ function openMutes(parts) {
 
 function setMuteForm([type, user, rule, asn, network]) {
   muteErrors = {};
-  muteNotice = null;
+  muteNotice = muteHint ? { ok: false, kind: "warn", text: muteHint } : null;
+  muteHint = "";
   const known = !type || type === "*" || muteTypes().some((t) => t[0] === type);
   muteForm = { type: known ? type || "*" : "*", user: user || "", rule_name: type === "inbox_rule" ? rule || "" : "",
                asn: asn || "", network: asn ? network || "" : "", days: "7", reason: "" };
@@ -2402,7 +2450,7 @@ function renderMutes() {
       h("p", { class: "lead", text: "Muted alerts are still recorded. You see them on the user page and in Alerts. Each change is recorded in History and emailed to the alert mailbox." })),
     h("div", { class: "stack" },
       h("div", { id: "mute-out", "aria-live": "polite" },
-        muteNotice ? notice(muteNotice.ok ? "ok" : "bad", h("p", { text: muteNotice.text })) : null),
+        muteNotice ? notice(muteNotice.kind || (muteNotice.ok ? "ok" : "bad"), h("p", { text: muteNotice.text })) : null),
       h("section", { class: "card", "aria-labelledby": "mutes-active-title" },
         h("div", { class: "card-head" }, h("h2", { id: "mutes-active-title", tabindex: "-1", text: "Active mutes" }),
           active.length ? h("span", { class: "muted small", text: plural(active.length, "mute") }) : null),

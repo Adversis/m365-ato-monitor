@@ -168,3 +168,107 @@ class TestNetworkMute:
             "https://func.azurewebsites.net/api/manage#mute:mail_access:jane@contoso.com::AS63023:GTHost")
         assert alerting.ui_link("mute", "inbox_rule", USER, "News", "", "") == (
             "https://func.azurewebsites.net/api/manage#mute:inbox_rule:jane@contoso.com:News")
+
+
+class TestNetworkForOlderAlerts:
+    """Alerts recorded before the journal kept the ASN get it from the IP cache, or from one lookup."""
+
+    IP = "81.2.69.160"
+
+    def _old_row(self, jt):
+        journal.record(jt, _finding(ip=self.IP, asn="", network=""), "k1", "emailed", now=NOW)
+
+    def test_findings_filled_from_cache(self, ui_on):
+        import admin_api
+        from ip_checker import cache_ip_result
+        jt, cache = FakeTable(), FakeTable()
+        self._old_row(jt)
+        cache_ip_result(self.IP, GTHOST, cache)
+        with patch("journal.table_client", return_value=jt), \
+             patch("function_app._get_table_clients", return_value=(FakeTable(), cache)), \
+             patch("ip_checker._proxycheck_batch", wraps=__import__("ip_checker")._proxycheck_batch) as batch:
+            resp = admin_api.findings(_req("GET", "/api/manage/api/findings", params={"days": "7"}))
+        row = json.loads(resp.get_body())["findings"][0]
+        assert row["asn"] == "AS63023" and row["network"] == "GTHost"
+        assert all(c.args[2] is True for c in batch.call_args_list)      # cache only: no query
+
+    def test_findings_without_cache_entry_stay_empty(self, ui_on):
+        import admin_api
+        jt = FakeTable()
+        self._old_row(jt)
+        with patch("journal.table_client", return_value=jt), \
+             patch("function_app._get_table_clients", return_value=(FakeTable(), FakeTable())):
+            row = json.loads(admin_api.findings(_req("GET", "/api/manage/api/findings",
+                                                     params={"days": "7"})).get_body())["findings"][0]
+        assert row["asn"] == ""
+
+    def _network(self, ip):
+        import admin_api
+        resp = admin_api.ip_network(_req("GET", "/api/manage/api/ipnetwork", params={"ip": ip}))
+        return resp.status_code, json.loads(resp.get_body())
+
+    def test_lookup_queries_once(self, ui_on):
+        calls = []
+
+        def batch(ips, table=None, cache_only=False):
+            calls.append(cache_only)
+            return {} if cache_only else {self.IP: GTHOST}
+        with patch("ip_checker.check_ips_batch", side_effect=batch), \
+             patch("proxycheck_quota.status", return_value={"level": "ok"}):
+            assert self._network(self.IP) == (200, {"asn": "AS63023", "network": "GTHost", "note": ""})
+        assert calls == [True, False]
+
+    def test_lookup_skipped_when_quota_low(self, ui_on):
+        with patch("ip_checker.check_ips_batch", return_value={}) as batch, \
+             patch("proxycheck_quota.status", return_value={"level": "exhausted"}):
+            assert self._network(self.IP)[1]["note"] == "quota"
+        assert batch.call_count == 1                                     # the cache read only
+
+    def test_private_failed_and_refused(self, ui_on):
+        import admin_api
+        assert self._network("10.0.0.1")[1]["note"] == "private"
+        assert self._network("not an ip")[1]["note"] == "private"
+        with patch("ip_checker.check_ips_batch", return_value={}), \
+             patch("proxycheck_quota.status", return_value={"level": "ok"}):
+            assert self._network(self.IP)[1] == {"asn": "", "network": "", "note": "failed"}
+        resp = admin_api.ip_network(_req("GET", "/api/manage/api/ipnetwork", params={"ip": self.IP},
+                                         roles=("Other.Role",)))
+        assert resp.status_code == 403
+
+
+class TestQuietRows:
+    """Muted rows read as Benign; "alert off" rows are only on the user page."""
+
+    def _journal(self):
+        jt = FakeTable()
+        journal.record(jt, _finding(), "k-mail", "emailed", now=NOW)
+        journal.record(jt, _finding(type="session_reuse"), "k-muted", "muted", action="Mute: x", now=NOW)
+        journal.record(jt, _finding(type="failed_login"), "k-off", "alert off", now=NOW)
+        return jt
+
+    def _findings(self, jt, **params):
+        import admin_api
+        with patch("journal.table_client", return_value=jt), \
+             patch("function_app._get_table_clients", return_value=(FakeTable(), FakeTable())):
+            resp = admin_api.findings(_req("GET", "/api/manage/api/findings", params={"days": "7", **params}))
+        return json.loads(resp.get_body())
+
+    def test_muted_row_is_benign_until_an_admin_triages_it(self, ui_on):
+        jt = self._journal()
+        rows = {r["status"]: r for r in journal.recent(jt, NOW - timedelta(days=1))}
+        assert rows["muted"]["triage"] == "benign" and rows["emailed"]["triage"] == ""
+        assert [r["status"] for r in self._findings(jt, triage="open")["findings"]] == ["emailed"]
+        assert [r["status"] for r in self._findings(jt, triage="benign")["findings"]] == ["muted"]
+        # An admin sets it back to Open: the choice holds.
+        journal.set_triage(jt, rows["muted"]["id"], "", "", "admin@contoso.com", NOW)
+        muted = [r for r in journal.recent(jt, NOW - timedelta(days=1)) if r["status"] == "muted"][0]
+        assert muted["triage"] == "" and muted["triage_by"] == "admin@contoso.com"
+
+    def test_alert_off_only_on_user_page(self, ui_on):
+        jt = self._journal()
+        body = self._findings(jt, triage="")
+        assert sorted(r["status"] for r in body["findings"]) == ["emailed", "muted"]
+        assert "alert off" not in body["summary"]["by_status"]
+        assert self._findings(jt, triage="", status="alert off")["findings"] == []
+        # The user page reads journal.for_user, which keeps them.
+        assert "alert off" in {r["status"] for r in journal.for_user(jt, USER, journal.ANY_TIME)}

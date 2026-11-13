@@ -1510,6 +1510,11 @@ def manage_record(req: func.HttpRequest) -> func.HttpResponse:
     return admin_api.finding_record(req)
 
 
+@app.route(route="manage/api/ipnetwork", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def manage_ip_network(req: func.HttpRequest) -> func.HttpResponse:
+    return admin_api.ip_network(req)
+
+
 @app.route(route="manage/api/triage", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def manage_triage(req: func.HttpRequest) -> func.HttpResponse:
     return admin_api.triage(req)

@@ -1,0 +1,35 @@
+# Monthly check of function/microsoft_nets.json: the Microsoft 365 server IP
+# ranges (Office 365 endpoints minus all Azure service tags) whose records the
+# session and mail access checks skip. The run fails if Microsoft changed its
+# lists since the file was made, or if a hand-kept INTERNAL_NETS prefix is in
+# an Azure service tag. A failed scheduled run emails the repository owners.
+# Fix: run scripts/update_microsoft_nets.py, commit the file, and deploy.
+# No Azure credentials; the token is read-only.
+
+name: Microsoft 365 server ranges
+
+on:
+  # Not on pull requests: the check downloads Microsoft's lists, and a failed
+  # download must not fail an unrelated change.
+  schedule:
+    - cron: "41 6 3 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check against Microsoft IP lists
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Check the ranges
+        run: python scripts/update_microsoft_nets.py --check

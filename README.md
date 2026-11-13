@@ -242,6 +242,7 @@ How each check works: [Architecture](docs/ARCHITECTURE.md#compromise-check). How
 
 - AiTM phishing through a residential proxy in the user's own country. The monitor detects the attacker's next steps instead: inbox rules, forwarding, MFA changes, and app consents.
 - A stolen session used from a normal home or office network in the user's own country.
+- Session and mail access activity from Microsoft 365's own servers, for example Teams, Copilot, or Outlook mobile acting for the user. The record then shows a Microsoft IP, not the client's. The monitor skips these IPs. It takes them from Microsoft's published lists, without the Azure ranges that customers can use.
 - Mail read with a stolen token, if the tenant does not log `MailItemsAccessed`. Business plans may not log it. The Overview page shows if your tenant does.
 - Passkey and FIDO2 registration, and SharePoint, OneDrive, and Teams activity.
 - A new device, browser, or mail client.

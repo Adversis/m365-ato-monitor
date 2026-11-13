@@ -224,10 +224,21 @@ def _row(entity: dict) -> dict:
         "run_id": entity.get("run_id", ""),
         "repeats": int(entity.get("repeats") or 0), "last_repeat": entity.get("last_repeat", ""),
         "id": f"{entity.get('PartitionKey', '')}|{entity.get('RowKey', '')}",
-        "triage": entity.get("triage", "") if entity.get("triage", "") in TRIAGE_STATES else "",
+        "triage": _triage(entity),
         "triage_by": entity.get("triage_by", ""), "triage_at": entity.get("triage_at", ""),
         "triage_note": entity.get("triage_note", ""),
     }
+
+
+def _triage(entity: dict) -> str:
+    """The triage state of a row. A muted row that no admin triaged reads as benign: the mute is the
+    admin's decision. An admin can still set it to Open (triage_by is then set)."""
+    state = entity.get("triage", "")
+    if state not in TRIAGE_STATES:
+        state = ""
+    if not state and not entity.get("triage_by") and entity.get("status") == "muted":
+        return "benign"
+    return state
 
 
 def for_user(table, upn: str, since: datetime, exclude_key: str = "", limit: int = 50) -> list:
