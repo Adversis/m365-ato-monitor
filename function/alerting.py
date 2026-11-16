@@ -348,7 +348,7 @@ def _user_button(event: dict, user: str = "") -> str:
 
 _STATUS_TEXT = {"emailed": "alert sent", "email failed": "email failed", "alert off": "alert type off",
                 "muted": "muted", "onboarding": "onboarding scan", "install": "made by install.ps1",
-                "microsoft": "Microsoft service"}
+                "microsoft": "Microsoft service", "known sign-in": "known sign-in, no email"}
 
 
 def _repeats_text(row: dict) -> str:
@@ -973,7 +973,7 @@ def send_weekly_report(stats, findings: list, health: dict, now: datetime = None
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(days=7)
     period = f"{start.day} {start:%b} to {now.day} {now:%b %Y}"
-    alerts = [f for f in findings if f.get("status") not in ("onboarding", "install", "microsoft")]
+    alerts = [f for f in findings if f.get("status") not in ("onboarding", "install", "microsoft", "known sign-in")]
     high = [f for f in alerts if f.get("severity") == "high"]
     if totals is None:
         totals = {"total": len(alerts), "high": len(high), "by_type": {}, "by_status": {}}

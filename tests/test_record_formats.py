@@ -255,7 +255,7 @@ class TestMfaServiceActor:
                  "ModifiedProperties": [{"Name": "StrongAuthenticationMethod", "OldValue": old, "NewValue": new}]}
         f = cd.detect_mfa_changes([event])[0]
         assert f["user"] == "victim@contoso.com"
-        assert "Changed by Azure MFA StrongAuthenticationService" in f["description"]
+        assert "record written by Azure MFA StrongAuthenticationService" in f["description"]
 
     def test_pretty_printed_json_with_crlf(self):
         old = "[\r\n  {\r\n    \"DeviceName\": \"iPhone\",\r\n    \"DeviceToken\": \"a\"\r\n  }\r\n]"

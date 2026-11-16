@@ -44,7 +44,7 @@ from ip_checker import (
 from alerting import (
     send_summary_email, send_compromise_alert, send_setup_confirmation,
     send_suspicious_login_alert, send_login_digest,
-    send_country_anomaly_alert, send_weekly_report, flush_outbox,
+    send_country_anomaly_alert, send_weekly_report, flush_outbox, short_title,
 )
 from compromise_detector import (
     install_grant,
@@ -68,6 +68,7 @@ import selftest
 import private_relay
 import proxycheck_quota
 import session_monitor
+import signin_networks
 from service_actors import is_microsoft_service
 
 app = func.FunctionApp()
@@ -307,20 +308,27 @@ def audit_log_monitor(timer: func.TimerRequest) -> None:
         failed = True
         logging.exception("Login check failed")
     try:
-        _run_compromise_check(events_table, ip_cache_table, processed_keys, aad + exchange)
+        # Before the compromise check: its MFA change check reads them.
+        signin_networks.record(geo_monitor.table_client() if events_table else None,
+                               filter_login_records(aad), started)
     except Exception:
-        failed = True
-        logging.exception("Compromise check failed")
+        logging.exception("Sign-in networks not kept")
     try:
         # Before the session and mail access checks: both skip an IP that signed in as the user.
         mail_access.remember_signins(events_table, aad, started)
     except Exception:
         logging.exception("Sign-in IPs not kept")
     try:
+        # Before the compromise check: a session alert makes a later MFA change of the user alert.
         _run_session_check(events_table, ip_cache_table, processed_keys, aad + exchange, started)
     except Exception:
         failed = True
         logging.exception("Session check failed")
+    try:
+        _run_compromise_check(events_table, ip_cache_table, processed_keys, aad + exchange)
+    except Exception:
+        failed = True
+        logging.exception("Compromise check failed")
     try:
         _run_mail_access_check(events_table, ip_cache_table, processed_keys, exchange, started)
     except Exception:
@@ -738,6 +746,14 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     # (LOGIN_ALERT_FAILED), as for a suspicious sign-in IP. No IP lookup is spent on it.
     for finding in [f for f in new_findings if finding_key(f) not in processed_keys and failed_sign_in_off(f)]:
         _record_not_alert(finding, events_table, processed_keys, now, "alert off", FAILED_SIGN_IN_OFF)
+    geo_table = geo_monitor.table_client() if events_table else None
+    mfa_context = {}
+    for finding in [f for f in new_findings if finding_key(f) not in processed_keys and mfa_method_change(f)]:
+        quiet, context = _mfa_review(finding, geo_table, now)
+        if quiet:
+            _record_not_alert(finding, events_table, processed_keys, now, "known sign-in", quiet)
+        else:
+            mfa_context[id(finding)] = context
     new_findings = [f for f in new_findings if finding_key(f) not in processed_keys]
     if not new_findings:
         return
@@ -752,7 +768,6 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     }
     ip_results = check_ips_batch(sorted(finding_ips), ip_cache_table) if finding_ips else {}
 
-    geo_table = geo_monitor.table_client() if events_table else None
     now = datetime.now(timezone.utc)
     sent_count = 0
     failed = False
@@ -776,6 +791,7 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
             elif geo_monitor.is_unusual(geo_table, str(finding.get("user", "")), cc, now):
                 ip_context = f"Source IP country {cc} is new for this user ({analysis['org']})"
                 finding["severity"] = "high"
+        ip_context = "; ".join(t for t in (mfa_context.get(id(finding), ""), ip_context) if t)
 
         if _deliver_finding(finding, ip_context, events_table, processed_keys, geo_table, now,
                             ip_unchecked=ip_unchecked):
@@ -789,6 +805,56 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     )
     if failed:
         raise RuntimeError("Compromise alerts remain neither delivered nor queued")
+
+
+MFA_PRIOR_DAYS = 7
+
+
+def mfa_method_change(finding: dict) -> bool:
+    """An MFA method added or changed on one account ("Update user."): by the user or by an admin.
+
+    Per-user MFA turned off and tenant MFA settings always alert.
+    """
+    event = finding.get("event") or {}
+    return finding.get("type") == "mfa_change" and event.get("Operation") == "Update user."
+
+
+def _mfa_review(finding: dict, geo_table, now: datetime) -> tuple:
+    """(quiet reason, alert context) for an MFA method change on one account.
+
+    The person who signed in is the user (My Sign-ins; the MFA service writes the record) or,
+    for an admin who changed another user's methods, the admin. Alert when the user or the
+    admin had another alert in the MFA_PRIOR_DAYS before (then high), when that person's
+    sign-in before the change came from a network that they did not use before, or when the
+    monitor cannot tell. A quiet reason means: no email, a journal row only.
+    """
+    user = str(finding.get("user") or "").strip()
+    actor = str(finding.get("actor") or "").strip()
+    admin = "@" in actor and actor.lower() != user.lower()
+    signer = actor if admin else user
+    who = actor if admin else "the user"
+    when = journal.event_time(finding.get("event") or {}, now)
+    since = when - timedelta(days=MFA_PRIOR_DAYS)
+    for account in [user] + ([actor] if admin else []):
+        prior = [r for r in journal.for_user(journal.table_client(), account, since, exclude_key=finding_key(finding))
+                 if r["status"] in ("emailed", "email failed") and r["triage"] != "benign"]
+        if prior:
+            finding["severity"] = "high"
+            name = "the user" if account == user else account
+            return "", (f"{name[0].upper() + name[1:]} had another alert in the {MFA_PRIOR_DAYS} days before: "
+                        f"{short_title(prior[0]['type'])} ({prior[0]['at']})")
+    seen = signin_networks.near(geo_table, signer, when)
+    if not seen["history"]:
+        return "", ""
+    if not seen["ips"]:
+        return "", f"No sign-in by {who} was seen in the hour before the change"
+    if seen["new"]:
+        finding["ip"] = seen["new"][0]
+        return "", (f"Changed after a sign-in by {who} from {seen['new'][0]}, a network that "
+                    f"{'they' if admin else 'the user'} did not use before")
+    accounts = "neither account" if admin else "the user"
+    return (f"No email: changed after a sign-in by {who} from {', '.join(seen['ips'])} (a network used "
+            f"before), and {accounts} had no other alert in the {MFA_PRIOR_DAYS} days before"), ""
 
 
 def _record_install_grant(finding: dict, events_table, processed_keys: set, now: datetime) -> None:

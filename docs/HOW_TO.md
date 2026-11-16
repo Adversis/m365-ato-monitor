@@ -587,7 +587,7 @@ Microsoft can also send its own alert for some of these changes (for example the
 | Test | How | Expected alert |
 |---|---|---|
 | Device code sign-in | `az login --use-device-code --allow-no-subscriptions`, sign in as the test user | MEDIUM Device code sign-in |
-| MFA method added | As the test user (with MFA set up), add a second method at https://mysignins.microsoft.com/security-info | MEDIUM MFA change |
+| MFA method added | As the test user (with MFA set up), add a second method at https://mysignins.microsoft.com/security-info | MEDIUM MFA change if the test user signed in from a new network, or had another alert in the 7 days before (then HIGH). From a usual network: no email, a "Known sign-in" row in Alerts. In the first 14 days after an install or update, always MEDIUM MFA change |
 | Outlook desktop rule | In Outlook desktop as the test user, create a rule that forwards to the outside address | HIGH Inbox rule (`UpdateInboxRules`) |
 | VPN or new country | Sign in as the test user through a VPN exit in another country | Suspicious sign-in; new country after the learning period (or with `HOME_COUNTRIES` set) |
 | Session reuse | Sign in as the test user in a browser and open Outlook on the web. Keep the browser open, turn on a VPN with an exit in another country, and reload Outlook on the web. | HIGH Session reuse (the record must carry the session ID; Outlook on the web records do) |

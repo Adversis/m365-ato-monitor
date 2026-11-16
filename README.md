@@ -222,7 +222,7 @@ Sign-in uses Entra ID. The person who runs the install can open the page. To giv
 | Mailbox forwarding | Forwarding to an external address (high) or an internal address (medium) | High or medium |
 | Mail flow (transport) rules | External BCC or redirect; skip spam filtering | High or medium |
 | OAuth consent | An app gets mailbox, file, or directory access, such as `Mail.Read` or `full_access_as_app` | High |
-| MFA changes | A method added to an account that already has MFA; per-user MFA turned off | High or medium |
+| MFA changes | A method added to an account that already has MFA; per-user MFA turned off. A method added by the user or by an admin sends email only if one of them had another alert in the 7 days before, or the person who made the change signed in from a new network in the hour before. Otherwise it is in the alert list with no email. In the first 14 days after an install or update, every such change sends email (the monitor learns each user's networks) | High or medium |
 | Admin roles | Global Administrator or another admin role assigned | High or medium |
 | Mailbox delegation | Full Access or Send As granted; a folder shared with everyone | Medium |
 | App credentials | A secret or certificate added to an app registration | Medium |

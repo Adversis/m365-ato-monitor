@@ -1255,9 +1255,13 @@ def _mfa_finding(event: dict) -> Optional[dict]:
     if not changes:
         return None
     target = _target_user(event)
+    actor = _actor_name(event)
+    # The MFA service writes the record when the user registers a method in My Sign-ins.
+    by = (f"Changed by {actor}." if "@" in actor else
+          f"Registered by the user, or by someone with the user's sign-in (record written by {actor}).")
     return _finding("mfa_change", "medium", target,
                     f"An MFA method was added or changed for {target}, which already had MFA "
-                    f"({'; '.join(changes)}). Changed by {_actor_name(event)}.", event, target=target)
+                    f"({'; '.join(changes)}). {by}", event, target=target)
 
 
 def detect_mfa_changes(events: list[dict]) -> list[dict]:

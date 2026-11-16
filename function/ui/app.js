@@ -20,6 +20,7 @@ const STATUS_PILLS = {
   muted: ["info", "Muted"],
   onboarding: ["neutral", "Onboarding scan"],
   microsoft: ["neutral", "Microsoft service"],
+  "known sign-in": ["neutral", "Known sign-in"],
 };
 // The triage state that an admin sets. It changes only the view: later alerts still go out.
 const TRIAGE = { "": ["neutral", "Open"], investigating: ["warn", "Investigating"], benign: ["ok", "Benign"], resolved: ["ok", "Resolved"] };
@@ -693,9 +694,10 @@ function alertFeed(rows) {
 
 // The triage state on the Overview: a tag for Investigating, Benign, and Resolved. Open has none.
 const CLOSED = ["benign", "resolved"];
-// Rows that sent no email because an admin decided so (a mute, an alert type off) or because a
-// Microsoft service made the change. They are shown greyed out.
-const QUIET = ["muted", "alert off", "microsoft"];
+// Rows that sent no email because an admin decided so (a mute, an alert type off), because a
+// Microsoft service made the change, or because the user registered an MFA method after a sign-in
+// from a known network. They are shown greyed out.
+const QUIET = ["muted", "alert off", "microsoft", "known sign-in"];
 const isQuiet = (r) => QUIET.includes(r.status) || CLOSED.includes(r.triage);
 // A muted row that no admin triaged reads as Benign (the server sets it): say why.
 const autoBenign = (r) => r.status === "muted" && r.triage === "benign" && !r.triage_by;
@@ -1535,7 +1537,7 @@ let alertsLoading = false;
 let alertsSeq = 0;
 
 // The label of a row's action text: what the monitor did, or why it sent no email.
-const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No email" };
+const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No email", "known sign-in": "No email" };
 
 function findingsTable(rows, withUser, onTriaged) {
   const columns = [["Time", "nowrap"], ...(withUser ? [["User", "user"]] : []), ["Alert", "primary"], ["Severity", "nowrap"],

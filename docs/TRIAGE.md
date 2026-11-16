@@ -440,7 +440,7 @@ Subject: `[M365 Alert] MEDIUM: MFA change - <user>` (or HIGH). Email title: "MFA
 
 **If benign.** A one-time change needs no tuning.
 
-**Severity.** Medium. High: per-user MFA turned off, or the source IP is flagged or new for the user. A first MFA registration does not cause an alert. The monitor cannot see passkey, FIDO2, and Windows Hello registrations.
+**Severity.** Medium. High: per-user MFA turned off, the source IP is flagged or new for the user, or the user had another alert in the 7 days before. A first MFA registration does not cause an alert. A method added by the user or by an admin sends no email when the sign-in of the person who made the change (in the hour before) came from a network that they used before, and neither the user nor the admin had another alert in 7 days: it shows in the alert list as "Known sign-in". The alert says which case applies: another alert, a sign-in from a new network (its IP), or no sign-in seen. In the first 14 days after an install or update, the monitor learns the networks and every such change sends email. The monitor cannot see passkey, FIDO2, and Windows Hello registrations.
 
 <a id="admin_role"></a>
 ## admin_role — Admin role
