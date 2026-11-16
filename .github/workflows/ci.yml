@@ -11,10 +11,10 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Weekly run: finds new CVEs and breaking releases in the Python
-    # dependencies. The deploy installs the newest versions that
-    # function/requirements.txt allows.
-    - cron: "23 5 * * 1"
+    # Monthly run (the 1st): finds new CVEs and breaking releases in the
+    # Python dependencies, and tests that fail after a date. The deploy
+    # installs the newest versions that function/requirements.txt allows.
+    - cron: "23 5 1 * *"
   workflow_dispatch:
 
 permissions: {}

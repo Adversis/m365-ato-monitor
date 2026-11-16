@@ -38,6 +38,7 @@ MICROSOFT_TENANTS = frozenset({
 NOISE_TYPES = frozenset({"oauth_consent"})
 _GRAPH = "https://graph.microsoft.com/v1.0/servicePrincipals"
 _ERROR_SECONDS = 900    # a failed lookup is not tried again for 15 minutes
+_GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SP_RE = re.compile(r"^ServicePrincipal_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$")
 _CACHE_SECONDS = 24 * 3600
 _cache = {}             # service principal object ID -> (time, owner tenant ID or "")
@@ -58,21 +59,39 @@ def actor_service_principals(event: dict) -> list:
 
 def owner_tenant(sp_id: str) -> Optional[str]:
     """appOwnerOrganizationId of a service principal ("" if none or not found). None if unknown now."""
+    return _owner(sp_id, f"{_GRAPH}/{sp_id}")
+
+
+def app_owner_tenant(app_id: str) -> Optional[str]:
+    """appOwnerOrganizationId of the service principal of an app (by app ID). "" if not found, None if
+    unknown now or ``app_id`` is not a GUID."""
+    app_id = str(app_id or "").strip().lower()
+    if not _GUID_RE.match(app_id):
+        return None
+    return _owner("app:" + app_id, f"{_GRAPH}(appId='{app_id}')")
+
+
+def is_microsoft_app(app_id: str) -> bool:
+    """True if the app belongs to a Microsoft tenant. False if not, or if Graph cannot say now."""
+    return app_owner_tenant(app_id) in MICROSOFT_TENANTS
+
+
+def _owner(key: str, url: str) -> Optional[str]:
     global _refused_until
-    hit = _cache.get(sp_id)
+    hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < _CACHE_SECONDS:
         return hit[1]
     if time.monotonic() < _refused_until:
         return None
-    failed = _failed.get(sp_id)
+    failed = _failed.get(key)
     if failed and time.monotonic() < failed:
         return None
     try:
-        resp = config.http.get(f"{_GRAPH}/{sp_id}", params={"$select": "appOwnerOrganizationId"},
+        resp = config.http.get(url, params={"$select": "appOwnerOrganizationId"},
                                headers={"Authorization": f"Bearer {token_manager.get_graph_token()}"}, timeout=10)
     except Exception as e:
-        logging.warning(f"Service principal {sp_id} not read: {type(e).__name__}")
-        _failed[sp_id] = time.monotonic() + _ERROR_SECONDS
+        logging.warning(f"Service principal {key} not read: {type(e).__name__}")
+        _failed[key] = time.monotonic() + _ERROR_SECONDS
         return None
     if resp.status_code in (401, 403):
         _refused_until = time.monotonic() + 3600
@@ -84,12 +103,12 @@ def owner_tenant(sp_id: str) -> Optional[str]:
         try:
             owner = str(resp.json().get("appOwnerOrganizationId") or "").lower()
         except (ValueError, AttributeError):
-            _failed[sp_id] = time.monotonic() + _ERROR_SECONDS
+            _failed[key] = time.monotonic() + _ERROR_SECONDS
             return None
     else:
-        _failed[sp_id] = time.monotonic() + _ERROR_SECONDS
+        _failed[key] = time.monotonic() + _ERROR_SECONDS
         return None
-    _cache[sp_id] = (time.monotonic(), owner)
+    _cache[key] = (time.monotonic(), owner)
     return owner
 
 

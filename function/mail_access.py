@@ -51,6 +51,7 @@ from azure.core.exceptions import ResourceNotFoundError
 from azure.data.tables import UpdateMode
 
 from ip_checker import extract_ip, network_fields
+import service_actors
 from microsoft_nets import is_service_ip
 
 _PARTITION = "system"
@@ -64,6 +65,9 @@ _SIGNIN_PARTITION = "signinip"
 REAL_IP_CLIENTS = ("client=owa", "client=msexchangerpc", "client=outlookservice", "client=activesync",
                    "client=webservices", "client=imap4", "client=pop3")
 _GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
+# APIs that a client with a user's token can call directly. A record whose token was for another API
+# (APIId) was written by the service of that API, which called Exchange for the user.
+_DIRECT_APIS = frozenset({_GRAPH_API_ID, "00000002-0000-0ff1-ce00-000000000000"})   # Graph, Exchange
 MAX_SUBJECTS = 3
 
 
@@ -277,9 +281,10 @@ def service_ip_client(record: dict) -> bool:
     """A record whose IP belongs to a Microsoft service, not the client.
 
     Network ownership alone cannot establish this: Azure hosts customer VMs.
-    Two cases count: a record (any workload) from a Microsoft 365 server IP
-    (microsoft_nets.py: no Azure customer space), and an Exchange Graph REST
-    record (the REST client marker and the Graph resource ID). Sign-in
+    Three cases count: a record (any workload) from a Microsoft 365 server IP
+    (microsoft_nets.py: no Azure customer space), an Exchange Graph REST
+    record (the REST client marker and the Graph resource ID), and an Exchange
+    record that a Microsoft service wrote for the user (relaying_app). Sign-in
     records always show the sign-in source and must not be excluded here.
     """
     operation = record.get("Operation")
@@ -293,7 +298,32 @@ def service_ip_client(record: dict) -> bool:
     ctx = record.get("AppAccessContext")
     api_id = ctx.get("APIId") if isinstance(ctx, dict) else ""
     resources = {str(v or "").lower() for v in (record.get("AppId"), api_id)}
-    return client == "client=rest" and _GRAPH_API_ID in resources
+    if client == "client=rest" and _GRAPH_API_ID in resources:
+        return True
+    app = relaying_app(record)
+    return bool(app) and service_actors.is_microsoft_app(app)
+
+
+def relaying_app(record: dict) -> str:
+    """The app ID of the service that called Exchange for the user, or "".
+
+    The user's app (ClientAppId, for example Teams) got a token for another
+    service's API (AppAccessContext.APIId, for example the Teams backend). Exchange
+    accepts no such token from a client: only that service can call Exchange with
+    it, from its own servers. So the record's IP is the service's. A token for
+    Exchange or Graph (_DIRECT_APIS) can come straight from a client: not counted.
+    The caller must also check that the app belongs to Microsoft (an app that a
+    user consented to can run on an attacker's server).
+    """
+    if record.get("Workload") != "Exchange":
+        return ""
+    ctx = record.get("AppAccessContext")
+    api = str(ctx.get("APIId") or "").strip().lower() if isinstance(ctx, dict) else ""
+    app = str(record.get("AppId") or "").strip().lower()
+    client = str(record.get("ClientAppId") or (ctx or {}).get("ClientAppId") or "").strip().lower()
+    if not api or not client or app != api or client == api or api in _DIRECT_APIS:
+        return ""
+    return api
 
 
 def observations(records: list) -> dict:

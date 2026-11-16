@@ -742,9 +742,13 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     if not new_findings:
         return
 
+    # A record that a Microsoft service wrote (for example a rule changed in Outlook mobile, through
+    # Microsoft's servers) shows the service's IP, not the client's. Its IP says nothing about the
+    # actor: no lookup, and it does not raise the severity. The content of the finding still decides.
+    service_ip = {id(f) for f in new_findings if f.get("ip") and mail_access.service_ip_client(f.get("event") or {})}
     finding_ips = {
         f["ip"] for f in new_findings
-        if f.get("ip") and not is_private_ip(f["ip"]) and not is_allowed_ip(f["ip"])
+        if f.get("ip") and id(f) not in service_ip and not is_private_ip(f["ip"]) and not is_allowed_ip(f["ip"])
     }
     ip_results = check_ips_batch(sorted(finding_ips), ip_cache_table) if finding_ips else {}
 
@@ -757,7 +761,9 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
         ip = finding.get("ip")
         # A failed lookup (quota, timeout) leaves the finding medium. A mute must not hide it.
         ip_unchecked = bool(ip) and ip in finding_ips and ip not in ip_results
-        if ip and ip in ip_results:
+        if id(finding) in service_ip:
+            ip_context = f"{ip} is a Microsoft service IP: the record does not show the client's IP"
+        elif ip and ip in ip_results:
             finding.update(network_fields(ip_results[ip]))
             analysis = analyze_ip(ip_results[ip])
             cc = geo_monitor.country_of(ip_results[ip])

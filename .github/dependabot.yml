@@ -1,6 +1,6 @@
 # Updates the pinned action SHAs in .github/workflows.
 # A new release must be 7 days old before Dependabot proposes it.
-# Python dependencies: the weekly CI run audits them (pip-audit).
+# Python dependencies: the monthly CI run audits them (pip-audit).
 version: 2
 updates:
   - package-ecosystem: github-actions

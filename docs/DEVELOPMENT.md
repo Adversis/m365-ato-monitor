@@ -38,7 +38,7 @@ make verify         # check the installed monitor (./install.ps1 -Verify)
 make uninstall      # remove the monitor from Azure (./install.ps1 -Uninstall)
 ```
 
-CI (`.github/workflows/ci.yml`) runs on each pull request, on each push to `main`, and every Monday. It has no Azure credentials and does not deploy.
+CI (`.github/workflows/ci.yml`) runs on each pull request, on each push to `main`, and on the 1st of each month. It has no Azure credentials and does not deploy.
 
 | Job | Checks |
 |---|---|
