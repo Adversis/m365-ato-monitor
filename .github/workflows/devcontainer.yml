@@ -1,7 +1,7 @@
 # Builds the dev container (.devcontainer/Dockerfile) and runs "make check"
 # in it: Python tests, pyflakes, the JavaScript syntax check, the PowerShell
 # syntax check, and the Pester tests of install.ps1. It runs when the
-# container or its inputs change, and weekly, so that a pinned download that
+# container or its inputs change, and monthly (the 1st), so that a pinned download that
 # disappears or changes (checksum) is found early. No secrets, no Azure.
 
 name: Dev container
@@ -25,7 +25,7 @@ on:
       - "tests/requirements-test.txt"
       - ".github/workflows/devcontainer.yml"
   schedule:
-    - cron: "41 5 * * 1"
+    - cron: "41 5 1 * *"
   workflow_dispatch:
 
 permissions: {}

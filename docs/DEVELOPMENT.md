@@ -47,6 +47,6 @@ CI (`.github/workflows/ci.yml`) runs on each pull request, on each push to `main
 | PowerShell (install.ps1) | PowerShell parser for the `.ps1` files; Pester tests of `install.ps1` with a fake `az` |
 | Workflow security (zizmor) | Injection, unpinned actions, and token permissions in `.github` |
 
-A second workflow (`.github/workflows/devcontainer.yml`) builds the dev container and runs `make check` in it. It runs when the container or its inputs change, and every Monday, so that a pinned download that changes or disappears is found early. Dependabot updates the base image.
+A second workflow (`.github/workflows/devcontainer.yml`) builds the dev container and runs `make check` in it. It runs when the container or its inputs change, and on the 1st of each month, so that a pinned download that changes or disappears is found early. Dependabot updates the base image.
 
 See [Security: CI](SECURITY.md#ci) for the repository settings to apply. To add a detection, see [AGENTS.md](../AGENTS.md#add-a-detection).
