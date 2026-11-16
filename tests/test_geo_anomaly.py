@@ -229,7 +229,20 @@ def _pc(ip, isocode, proxy="no", ptype="Residential"):
     return r
 
 
+class _FrozenClock(datetime):
+    """datetime whose now() is NOW: the pipeline reads the clock itself, and the baseline is dated from NOW."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return NOW if tz else NOW.replace(tzinfo=None)
+
+
 class TestPipeline:
+
+    @pytest.fixture(autouse=True)
+    def _clock(self):
+        with patch("function_app.datetime", _FrozenClock):
+            yield
 
     def _login(self, ip, user="victim@contoso.com"):
         return {"Id": f"login-{ip}", "RecordType": 15, "Operation": "UserLoggedIn",

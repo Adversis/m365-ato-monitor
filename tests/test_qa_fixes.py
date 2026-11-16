@@ -171,7 +171,8 @@ class TestMuteAfterFailedLookup:
     def _run(self, lookup):
         import function_app as fa
         admin_store.add_mute(FakeTable(), {"type": "inbox_rule", "user": "jane@contoso.com", "days": 7,
-                                           "reason": "known rule"}, "a@contoso.com", NOW - timedelta(hours=1))
+                                           "reason": "known rule"}, "a@contoso.com",
+                             datetime.now(timezone.utc) - timedelta(hours=1))   # the run uses the real time
         events = FakeTable()
         with patch("function_app._DETECTORS", (lambda ev: [dict(self.FINDING)],)), \
                 patch("function_app.check_ips_batch", return_value=lookup), \

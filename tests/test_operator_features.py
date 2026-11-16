@@ -249,7 +249,9 @@ class TestMutes:
 
     def test_signin_muted(self, jt):
         import function_app as fa
-        admin_store.add_mute(FakeTable(), _mute(type="suspicious_signin"), "a@contoso.com", NOW - timedelta(hours=1))
+        # _alert_signin checks the mute at the real time, not NOW.
+        admin_store.add_mute(FakeTable(), _mute(type="suspicious_signin"), "a@contoso.com",
+                             datetime.now(timezone.utc) - timedelta(hours=1))
         event = {"Id": "s1", "UserId": "jane@contoso.com", "Operation": "UserLoggedIn",
                  "CreationTime": "2026-11-08T11:00:00"}
         analysis = {"confidence": "medium", "flags": ["vpn"], "org": "VPN Co"}
