@@ -73,6 +73,37 @@ class TestTriage:
             assert _triage({"id": f"{pk}|{rk}", "state": "benign"})[0] == 404
 
 
+class TestBulkTriage:
+
+    def test_several_alerts_at_once(self, ui_on):
+        jt = FakeTable()
+        _seed(jt, 4)
+        with patch("journal.table_client", return_value=jt):
+            rows = _findings()[1]["findings"]
+            ids = [r["id"] for r in rows[:3]]
+            gone = "u-" + "0" * 32 + "|0000000000000-000000000000"
+            code, body = _triage({"ids": ids + [ids[0], gone], "state": "resolved", "note": "Checked with the user"})
+            assert code == 200 and body["not_found"] == 1 and body["not_saved"] == 0
+            assert sorted(f["id"] for f in body["findings"]) == sorted(ids)
+            _, data = _findings(triage="resolved")
+            assert data["count"] == 3 and _findings(triage="open")[1]["count"] == 1
+        history = [json.loads(r["changes"]) for r in ui_on["table"].partition("history").values()]
+        assert len(history) == 1 and len(history[0]) == 3                  # one entry, one line per alert
+        assert all(line["new"] == "Resolved: Checked with the user" for line in history[0])
+
+    def test_refused_lists(self, ui_on):
+        jt = FakeTable()
+        _seed(jt, 1)
+        with patch("journal.table_client", return_value=jt):
+            row = _findings()[1]["findings"][0]
+            assert _triage({"ids": [], "state": "benign"})[0] == 400
+            assert _triage({"ids": row["id"], "state": "benign"})[0] == 400             # not a list
+            assert _triage({"ids": [row["id"], 5], "state": "benign"})[0] == 400
+            assert _triage({"ids": [row["id"]] * 101, "state": "benign"})[0] == 400
+            assert _triage({"ids": ["u-x|' or 1 eq 1"], "state": "benign"})[0] == 404
+            assert _triage({"ids": [row["id"]], "state": "benign"}, headers={})[0] == 403
+
+
 class TestPages:
 
     def test_findings_pages(self, ui_on):

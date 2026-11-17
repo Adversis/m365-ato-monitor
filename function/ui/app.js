@@ -316,7 +316,7 @@ function same(a, b) {
 // rowClass: optional (row index) -> class of the <tr>.
 function table(columns, rows, rowClass) {
   return h("div", { class: "table-wrap" }, h("table", { class: "list rows" },
-    h("thead", {}, h("tr", {}, columns.map(([label]) => h("th", { scope: "col", text: label })))),
+    h("thead", {}, h("tr", {}, columns.map(([label, , head]) => head ? h("th", { scope: "col" }, head) : h("th", { scope: "col", text: label })))),
     h("tbody", {}, rows.map((cells, n) => h("tr", { class: rowClass ? rowClass(n) || null : null }, cells.map((cell, i) => {
       const [label, cls] = columns[i];
       return h("td", { class: cls || null, "data-label": label }, h("span", { class: "cell" }, cell));
@@ -1539,10 +1539,13 @@ let alertsSeq = 0;
 // The label of a row's action text: what the monitor did, or why it sent no email.
 const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No email", "known sign-in": "No email" };
 
-function findingsTable(rows, withUser, onTriaged) {
-  const columns = [["Time", "nowrap"], ...(withUser ? [["User", "user"]] : []), ["Alert", "primary"], ["Severity", "nowrap"],
+// ``selection`` (optional): { ids: Set of alert IDs, changed() }. Adds a checkbox to each row.
+function findingsTable(rows, withUser, onTriaged, selection) {
+  const pick = selection ? [["Select", "nowrap", selectAllBox(rows, selection)]] : [];
+  const columns = [...pick, ["Time", "nowrap"], ...(withUser ? [["User", "user"]] : []), ["Alert", "primary"], ["Severity", "nowrap"],
                    ["Email", "nowrap"], ["Triage", "nowrap"], ["Description"]];
   return table(columns, rows.map((r) => [
+    ...(selection ? [selectBox(r, selection)] : []),
     timeCell(r.at),
     ...(withUser ? [userLink(r.user)] : []),
     typeLabel(r.type),
@@ -1610,6 +1613,25 @@ function alertActions(r, withUser) {
   if (person && withUser) links.push(h("a", { href: userHash(r.user), text: "Respond on the user page" }));
   if (!links.length) return null;
   return h("span", { class: "sub row-actions" }, links.flatMap((a, i) => (i ? [" · ", a] : [a])));
+}
+
+function selectBox(r, selection) {
+  return h("input", { type: "checkbox", name: "alert-select", value: r.id, checked: selection.ids.has(r.id),
+    "aria-label": `Select the ${typeLabel(r.type)} alert of ${utc(r.at)}`,
+    onchange: (e) => { if (e.target.checked) selection.ids.add(r.id); else selection.ids.delete(r.id); selection.changed(); } });
+}
+
+// Selects or clears every alert on this page (the other pages keep their selection).
+function selectAllBox(rows, selection) {
+  const box = h("input", { type: "checkbox", "aria-label": "Select all alerts on this page",
+    checked: rows.length > 0 && rows.every((r) => selection.ids.has(r.id)),
+    onchange: () => {
+      for (const r of rows) { if (box.checked) selection.ids.add(r.id); else selection.ids.delete(r.id); }
+      const tableEl = box.closest("table");
+      if (tableEl) tableEl.querySelectorAll('input[name="alert-select"]').forEach((b) => { b.checked = box.checked; });
+      selection.changed();
+    } });
+  return box;
 }
 
 // The triage state of one alert: a select. A change asks for an optional note, then saves.
@@ -1944,9 +1966,13 @@ async function userAction(e, r, action) {
 }
 
 let userAlertsPage = 1;
+// Alerts selected on the user page, to set their triage in one step. Cleared for another user.
+const userSelection = { user: "", ids: new Set() };
 
 function userAlertsCard(r) {
   const rows = r.findings || [];
+  if (userSelection.user !== r.user) { userSelection.user = r.user; userSelection.ids.clear(); }
+  const bar = bulkTriageBar(rows, () => renderUsers());
   const pages = Math.max(1, Math.ceil(rows.length / USER_ALERTS_PAGE));
   if (userAlertsPage > pages) userAlertsPage = pages;
   const shown = rows.slice((userAlertsPage - 1) * USER_ALERTS_PAGE, userAlertsPage * USER_ALERTS_PAGE);
@@ -1954,8 +1980,66 @@ function userAlertsCard(r) {
   return h("section", { class: "card", "aria-labelledby": "user-alerts-title" },
     h("div", { class: "card-head" }, h("h2", { id: "user-alerts-title", tabindex: "-1", text: "Alerts" }),
       h("span", { class: "muted small", text: "Last 90 days" })),
-    rows.length ? [findingsTable(shown, false, () => renderUsers()), pager(userAlertsPage, USER_ALERTS_PAGE, rows.length, go, "Alert pages of this user")]
+    rows.length ? [bar.el, findingsTable(shown, false, () => renderUsers(), bar.selection),
+                   pager(userAlertsPage, USER_ALERTS_PAGE, rows.length, go, "Alert pages of this user")]
       : empty("ok", "No alerts for this user", "Each detection for this user shows here, also when no email was sent."));
+}
+
+// The bar above the user's alerts: how many are selected, a triage state, and Set triage.
+function bulkTriageBar(rows, onDone) {
+  const count = h("span", { "aria-live": "polite" });
+  const choice = h("select", { id: "bulk-triage", class: "select-sm", "aria-label": "Triage for the selected alerts" },
+    Object.entries(TRIAGE).map(([v, [, label]]) => h("option", { value: v, text: label, selected: v === "benign" })));
+  const apply = h("button", { type: "button", class: "btn", text: "Set triage" });
+  const clear = h("button", { type: "button", class: "btn btn-quiet", text: "Clear selection" });
+  const selection = {
+    ids: userSelection.ids,
+    changed() {
+      const n = this.ids.size;
+      count.textContent = n ? `${n} selected` : "Select alerts to set their triage together.";
+      apply.disabled = !n;
+      clear.hidden = !n;
+    },
+  };
+  apply.addEventListener("click", () => bulkTriage(rows, selection, choice.value, apply, onDone));
+  clear.addEventListener("click", () => { selection.ids.clear(); onDone(); });
+  selection.changed();
+  return { selection, el: h("div", { class: "toolbar", role: "group", "aria-label": "Selected alerts" }, count, choice, apply, clear) };
+}
+
+async function bulkTriage(rows, selection, next, button, onDone) {
+  const ids = [...selection.ids];
+  const note = h("input", { type: "text", id: "bulk-triage-note", maxlength: "300",
+    placeholder: "For example: the user's own rules, checked with them" });
+  const ok = await confirmDialog({
+    title: `Set ${ids.length} alert${ids.length === 1 ? "" : "s"} to ${TRIAGE[next][1]}`,
+    body: [h("p", { text: "This changes only this list. Later alerts still send email. History records the change." }),
+      h("div", { class: "dialog-field" }, h("label", { for: "bulk-triage-note", text: "Note (optional)" }), note)],
+    ok: "Save" });
+  if (!ok) return;
+  setBusy(button, true);
+  let saved = 0;
+  let failed = "";
+  try {
+    // The server takes up to 100 alerts in one request.
+    for (let i = 0; i < ids.length; i += 100) {
+      const result = await api("/triage", { method: "POST", body: { ids: ids.slice(i, i + 100), state: next, note: note.value } });
+      for (const f of result.findings || []) {
+        const row = rows.find((r) => r.id === f.id);
+        if (row) Object.assign(row, f);
+        selection.ids.delete(f.id);
+        saved += 1;
+      }
+    }
+  } catch (err) {
+    if (err instanceof SessionError) { handleError(err); return; }
+    failed = err.message;
+  }
+  setBusy(button, false);
+  if (failed) toast(`${saved} of ${ids.length} saved. Not saved: ${failed}`);
+  else toast(`${saved} alert${saved === 1 ? "" : "s"} set to ${TRIAGE[next][1]}.`);
+  if (!failed) selection.ids.clear();
+  onDone();
 }
 
 // Audit search (Microsoft Graph): the audit records of one user, up to 180 days.

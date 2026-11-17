@@ -688,8 +688,14 @@ def finding_record(req: func.HttpRequest) -> func.HttpResponse:
     return _json(found)
 
 
+TRIAGE_MAX_IDS = 100
+
+
 def triage(req: func.HttpRequest) -> func.HttpResponse:
-    """Set the triage state of one alert. It changes only the view: later alerts still go out."""
+    """Set the triage state of one alert ("id") or of several ("ids", up to TRIAGE_MAX_IDS).
+
+    It changes only the view: later alerts still go out. History records one line per alert.
+    """
     user = guard(req, mutating=True)
     if isinstance(user, func.HttpResponse):
         return user
@@ -697,25 +703,47 @@ def triage(req: func.HttpRequest) -> func.HttpResponse:
         body = req.get_json() or {}
     except ValueError:
         return _error(400, "The request body is not JSON.")
+    if not isinstance(body, dict):
+        return _error(400, "The request body must be a JSON object.")
     state, note = body.get("state", ""), body.get("note") or ""
     if state not in journal.TRIAGE_STATES:
         return _error(400, "state must be one of: " + ", ".join(repr(s) for s in journal.TRIAGE_STATES) + ".")
     if not isinstance(note, str) or any(not c.isprintable() for c in note):
         return _error(400, "The note must be one line of text.")
-    try:
-        before, after = journal.set_triage(journal.table_client(), str(body.get("id") or ""), state, note,
-                                           user["name"])
-    except Exception as e:
-        logging.error(f"Triage not saved: {type(e).__name__}")
-        return _error(503, "The change was not saved. Try again.")
-    if after is None:
-        return _error(404, "No such alert. Reload the page.")
-    label = f"Alert triage: {before['type']} for {before['user'] or 'unknown'} ({before['at']})"
-    new = TRIAGE_LABELS[state] + (f": {after['triage_note']}" if after["triage_note"] else "")
-    admin_store.record_history(admin_store.table_client(), user["name"],
-                               [{"label": label, "old": TRIAGE_LABELS.get(before["triage"], ""), "new": new}])
-    logging.info(f"Alert triage by {user['name']}: {before['key']} -> {state or 'open'}")
-    return _json({"finding": after})
+    many = "ids" in body
+    ids = body.get("ids") if many else [body.get("id")]
+    if (not isinstance(ids, list) or not ids or len(ids) > TRIAGE_MAX_IDS
+            or not all(isinstance(i, str) and i for i in ids)):
+        return _error(400, f"ids must be a list of 1 to {TRIAGE_MAX_IDS} alert IDs.")
+    ids = list(dict.fromkeys(ids))
+    table = journal.table_client()
+    changed, lines, missing = [], [], 0
+    for row_id in ids:
+        try:
+            before, after = journal.set_triage(table, row_id, state, note, user["name"])
+        except Exception as e:
+            logging.error(f"Triage not saved: {type(e).__name__}")
+            if changed:
+                break   # record what was saved, then report the failure
+            return _error(503, "The change was not saved. Try again.")
+        if after is None:
+            missing += 1
+            continue
+        changed.append(after)
+        new = TRIAGE_LABELS[state] + (f": {after['triage_note']}" if after["triage_note"] else "")
+        lines.append({"label": f"Alert triage: {before['type']} for {before['user'] or 'unknown'} ({before['at']})",
+                      "old": TRIAGE_LABELS.get(before["triage"], ""), "new": new})
+        logging.info(f"Alert triage by {user['name']}: {before['key']} -> {state or 'open'}")
+    if lines:
+        admin_store.record_history(admin_store.table_client(), user["name"], lines)
+    if not many:
+        if not changed:
+            return _error(404, "No such alert. Reload the page.")
+        return _json({"finding": changed[0]})
+    if not changed:
+        return _error(404, "No such alerts. Reload the page.")
+    return _json({"findings": changed, "not_found": missing,
+                  "not_saved": len(ids) - len(changed) - missing})
 
 
 def history(req: func.HttpRequest) -> func.HttpResponse:
