@@ -734,6 +734,10 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
             logging.exception(f"Detector {detector.__name__} failed")
     # Findings whose "no email" decision waits for late sign-in records (_REVIEW_SETTLE).
     held = _held_reviews(events_table)
+    held_by_key = {finding_key(f): f for f in held}
+    for finding in findings:
+        if finding_key(finding) in held_by_key:
+            finding["_held_since"] = held_by_key[finding_key(finding)].get("_held_since")
     known = {finding_key(f) for f in findings}
     findings += [f for f in held if finding_key(f) not in known]
     if not findings:
@@ -843,9 +847,11 @@ def _needs_context(finding: dict) -> bool:
 
 
 def _prior_alert(account: str, finding: dict, since: datetime) -> Optional[dict]:
-    """The newest alert for ``account`` since ``since`` that sent email and that no admin marked Benign."""
+    """The newest non-Benign alert since ``since``, no later than this finding's event time."""
+    until = journal.event_time(finding.get("event") or {}).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = journal.for_user(journal.table_client(), account, since, exclude_key=finding_key(finding), limit=1,
-                            keep=lambda r: r["status"] in ("emailed", "email failed") and r["triage"] != "benign")
+                            keep=lambda r: (r["at"] <= until and r["status"] in ("emailed", "email failed")
+                                            and r["triage"] != "benign"))
     return rows[0] if rows else None
 
 
@@ -892,8 +898,8 @@ def _context_review(finding: dict, geo_table, now: datetime, mfa_networks: Optio
     """(quiet reason, alert context, wait) for a finding that sends email only with context.
 
     Alert (high) when the user, or the admin who changed the user's MFA, had another alert in the
-    MFA_PRIOR_DAYS before. An MFA change then follows _mfa_networks. A rule that only deletes mail
-    alerts when its IP was not checked (a failed lookup must not hide it), when its own IP is on a
+    MFA_PRIOR_DAYS before. A failed IP lookup must not hide either kind of finding. An MFA change
+    then follows _mfa_networks. A rule that only deletes mail alerts when its own IP is on a
     network that the user did not use before, or when the user signed in from a new network in the
     RULE_SIGNIN_HOURS before. Without network history, a rule sends no email (it needs no new
     sign-in, so a missing sign-in says nothing). ``wait``: a later run can decide otherwise.
@@ -907,10 +913,11 @@ def _context_review(finding: dict, geo_table, now: datetime, mfa_networks: Optio
             name = "The user" if account == user else account
             return "", (f"{name} had another alert in the {MFA_PRIOR_DAYS} days before: "
                         f"{short_title(prior['type'])} ({prior['at']})"), False
+    if ip_unchecked:
+        context = mfa_networks[1] if mfa_networks else ""
+        return "", "; ".join(t for t in (context, "The source IP was not checked (the IP lookup failed)") if t), False
     if mfa_method_change(finding):
         return mfa_networks or ("", "", False)
-    if ip_unchecked:
-        return "", "The rule's IP was not checked (the IP lookup failed)", False
     before = timedelta(hours=RULE_SIGNIN_HOURS)
     row = signin_networks.view(geo_table, user)
     if rule_ip and signin_networks.known(row, rule_ip, when, before) is False:
@@ -1123,13 +1130,14 @@ def _run_session_check(events_table, ip_cache_table, processed_keys: set, record
     table = session_monitor.table_client()
     if table is None:
         return
-    # The mail access check reports mail reads and sends from a risky IP. Skip them here, unless it is off.
+    # Hand off only clients that the mail access check accepts. Other records still need this check.
     mail_checked = config.MAIL_ACCESS_CHECK and "mail_access" not in config.ALERTS_OFF and events_table is not None
     findings = session_monitor.check(
         table, records, lambda ips: check_ips_batch(ips, ip_cache_table), now, geo_monitor.table_client(),
         analyze=analyze_ip,
         known=lambda user, ip: mail_access.signed_in(events_table, user, ip, now),
-        skip=lambda r: mail_checked and r.get("Operation") in (mail_access.READ, mail_access.SEND))
+        skip=lambda r: (mail_checked and r.get("Operation") in (mail_access.READ, mail_access.SEND)
+                        and mail_access.real_ip_client(r)))
     # Findings of earlier runs whose alert did not go out (send and outbox failed, or the run stopped).
     findings += session_monitor.pending_findings(table, now, exclude={session_monitor.pending_key(f) for f in findings})
     geo_table = geo_monitor.table_client()

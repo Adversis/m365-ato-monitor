@@ -529,6 +529,10 @@ function Restore-AzSubscription {
 
 # Name and domains of the signed-in tenant (Graph /organization). Empty if Graph refuses.
 function Read-Organization {
+    # -UpdateAll reuses this process: a failed lookup must not keep another tenant's domains.
+    $script:TenantName = ''
+    $script:TenantDomain = ''
+    $script:TenantDomains = @()
     try {
         $org = @((Invoke-Rest -Method GET -Url "$($script:Graph)/organization" -Query @{ '$select' = 'displayName,verifiedDomains' }).value)[0]
     }
@@ -1359,9 +1363,13 @@ function Set-HealthAlerts([string]$Email, [string]$Loc) {
                    emailAddress = $(if ((Get-Value $r 'name') -eq 'admin') { $Email } else { "$(Get-Value $r 'emailAddress')" }) }
             })
             $props = Get-Value $ag 'properties'
+            $keep = @{}
+            foreach ($p in $props.PSObject.Properties) { $keep[$p.Name] = $p.Value }
+            $keep.emailReceivers = $list
+            $tags = Get-Value $ag 'tags'
+            if (-not $tags) { $tags = @{} }
             Invoke-Rest -Method PUT -Url $agUrl -Query $agApi -What "Send the health alerts of $($n.ActionGroup) to $Email" -Body @{
-                location = 'Global'; tags = @{ application = $script:Tag }
-                properties = @{ groupShortName = "$(Get-Value $props 'groupShortName')"; enabled = $true; emailReceivers = $list } } | Out-Null
+                location = 'Global'; tags = $tags; properties = $keep } | Out-Null
         }
     }
     if (-not $ag) {

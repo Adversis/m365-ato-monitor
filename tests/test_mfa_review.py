@@ -117,6 +117,26 @@ class TestReview:
         assert not send.called
         assert rows[0]["status"] == "known sign-in" and HOME_NEW_ADDR in rows[0]["action"]
 
+    def test_failed_source_ip_lookup_cannot_suppress_or_mute_mfa_change(self):
+        import admin_store
+        now = datetime.now(timezone.utc)
+        change = now - timedelta(hours=1)
+        geo, jt, events = FakeTable(), FakeTable(), FakeTable()
+        sn.record(geo, [signin(HOME, now - timedelta(days=30))], now - timedelta(days=30))
+        sn.record(geo, [signin(HOME_NEW_ADDR, change - timedelta(minutes=2))], now)
+        event = {**mfa_record(change), "ClientIP": RULE_IP}
+        admin_store.add_mute(FakeTable(), {"type": "mfa_change", "user": USER, "days": 7,
+                                          "reason": "Expected method changes"}, ADMIN, now)
+        with patch("geo_monitor.table_client", return_value=geo), \
+                patch("journal.table_client", return_value=jt), \
+                patch("function_app.check_ips_batch", return_value={}) as lookup, \
+                patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_compromise_check(events, None, set(), [event])
+        lookup.assert_called_once_with([RULE_IP], None)
+        assert send.call_count == 1 and "IP lookup failed" in send.call_args.args[1]
+        rows = journal.for_user(jt, USER, now - timedelta(days=1))
+        assert rows[0]["status"] == "emailed" and rows[0]["severity"] == "medium"
+
     def test_new_network_alerts(self):
         send, _ = self._run([(HOME, 30), (NEW, 3)])
         finding, context = send.call_args.args[:2]
@@ -299,6 +319,23 @@ class TestHeldDecision:
         rows = [r for r in journal.for_user(jt, USER, now - timedelta(days=1)) if r["type"] == "mfa_change"]
         assert rows[0]["status"] == "known sign-in"
 
+    def test_overlapping_fetch_keeps_first_sight_and_decides_after_30_minutes(self):
+        now = datetime.now(timezone.utc)
+        change = now - timedelta(minutes=10)
+        geo, jt, events = FakeTable(), FakeTable(), FakeTable()
+        sn.record(geo, [signin(HOME, now - timedelta(days=30))], now - timedelta(days=30))
+        a, b, c = self._env(geo, jt)
+        with a, b, c, patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_compromise_check(events, None, set(), [mfa_record(change)])
+            original = next(iter(events.partition("heldreview").values()))["finding"]
+            etag = dict(events.etags)
+            fa._run_compromise_check(events, None, set(), [mfa_record(change)])
+            assert next(iter(events.partition("heldreview").values()))["finding"] == original
+            assert events.etags == etag
+            self._age(events, 31)
+            fa._run_compromise_check(events, None, set(), [mfa_record(change)])
+            assert send.call_count == 1 and events.partition("heldreview") == {}
+
     def test_stale_held_row_is_removed(self):
         events = FakeTable()
         events.upsert_entity({"PartitionKey": "heldreview", "RowKey": "x", "finding": "{bad",
@@ -307,6 +344,24 @@ class TestHeldDecision:
 
 
 class TestPriorAlertLimit:
+    @pytest.mark.parametrize("with_prior", [False, True])
+    def test_future_alerts_do_not_count_or_hide_a_prior_alert(self, with_prior):
+        now = datetime.now(timezone.utc)
+        change = now - timedelta(hours=2)
+        jt = FakeTable()
+        if with_prior:
+            journal.record(jt, {"type": "inbox_rule", "severity": "medium", "user": USER,
+                                "event": {"CreationTime": _t(change - timedelta(hours=1))}},
+                           "before", "emailed", now=now)
+        for i in range(3):
+            journal.record(jt, {"type": "suspicious_signin", "severity": "medium", "user": USER,
+                                "event": {"CreationTime": _t(change + timedelta(minutes=i + 1))}},
+                           f"after-{i}", "emailed", now=now)
+        with patch("journal.table_client", return_value=jt):
+            prior = fa._prior_alert(USER, {"type": "mfa_change", "event": mfa_record(change)},
+                                    change - timedelta(days=7))
+        assert (prior["key"] if prior else None) == ("before" if with_prior else None)
+
     def test_many_quiet_rows_do_not_hide_a_prior_alert(self):
         # Regression: 60 "alert off" rows (a password spray) after an emailed alert.
         now = datetime.now(timezone.utc)

@@ -58,7 +58,7 @@ lint: lint-py lint-ps ## Run all linters
 
 lint-py: ## Check Python and JavaScript syntax; pyflakes if installed
 	@for f in function/*.py; do $(PY) -m py_compile "$$f" || exit 1; done
-	@if $(PY) -m pyflakes --version >/dev/null 2>&1; then $(PY) -m pyflakes function tests; \
+	@if $(PY) -m pyflakes --version >/dev/null 2>&1; then $(PY) -m pyflakes function/*.py tests; \
 	else echo "pyflakes not installed: skipped (pip install -r tests/requirements-test.txt)"; fi
 	@if command -v node >/dev/null 2>&1; then node --check function/ui/app.js; \
 	else echo "node not installed: JavaScript check skipped"; fi

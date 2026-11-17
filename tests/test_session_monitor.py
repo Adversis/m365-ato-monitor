@@ -304,12 +304,34 @@ class TestPipeline:
         assert sm.NETWORK_MARK in sessions.get_entity("session", SID)["alerted"]
 
     def test_mail_records_left_to_the_mail_access_check(self):
+        record = {**mail_access(VPN_IP, 9), "ClientInfoString": "Client=OWA"}
         with patch.object(config, "MAIL_ACCESS_CHECK", True):
-            send, _ = self._run([signin(HOME_IP, 1), mail_access(VPN_IP, 9)])
+            send, _ = self._run([signin(HOME_IP, 1), record])
         assert send.call_count == 0
         with patch.object(config, "MAIL_ACCESS_CHECK", False):
-            send, _ = self._run([signin(HOME_IP, 1), mail_access(VPN_IP, 9)])
+            send, _ = self._run([signin(HOME_IP, 1), record])
         assert send.call_count == 1
+
+    @pytest.mark.parametrize("client", [None, "Client=Unknown"])
+    @pytest.mark.parametrize("operation", ["MailItemsAccessed", "Send"])
+    def test_mail_record_without_supported_client_still_alerts(self, client, operation):
+        import function_app as fa
+        record = {**mail_access(VPN_IP, 9), "Operation": operation}
+        if client is not None:
+            record["ClientInfoString"] = client
+        events, sessions = FakeTable(), FakeTable()
+        with patch.object(config, "SESSION_CHECK_ENABLED", True), \
+                patch.object(config, "MAIL_ACCESS_CHECK", True), \
+                patch("session_monitor.table_client", return_value=sessions), \
+                patch("geo_monitor.table_client", return_value=None), \
+                patch("journal.table_client", return_value=FakeTable()), \
+                patch("function_app.check_ips_batch", side_effect=lambda ips, *_a, **_kw: Lookup()(ips)), \
+                patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_session_check(events, FakeTable(), set(), [signin(HOME_IP, 1), record], NOW)
+            fa._run_mail_access_check(events, FakeTable(), set(), [record], NOW)
+            assert send.call_count == 1
+            assert send.call_args.args[0]["type"] == "session_reuse"
+            assert sm.NETWORK_MARK in sessions.get_entity("session", SID)["alerted"]
 
     def _run_on(self, sessions, events, records, sent=True):
         import function_app as fa

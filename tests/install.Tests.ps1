@@ -814,6 +814,78 @@ Describe 'Alert mailbox set in the management UI' {
     }
 }
 
+Describe 'Health alert receivers on a mailbox change' {
+    It 'keeps the other receivers, tags, and enabled state' {
+        New-FakeAzure
+        Mock Start-Sleep {}
+        Mock Read-Host { 'y' }
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200; Content = '{"status":"healthy","checks":{"azure_ad_token":"ok"}}' } }
+        $DryRun = $false; $Yes = $true; $Update = $false; $Tenant = ''
+        $AdminEmail = 'security@contoso.com'; $Location = 'eastus'; $Name = 'm365-ato-monitor'
+        $ResponsePermissions = 'no'; $MailSendScope = 'tenant'; $UiAdmins = @(); $SubscriptionId = ''
+        Install-Monitor
+        $ag = $global:Fake.Created.ag
+        $ag.tags | Add-Member -NotePropertyName owner -NotePropertyValue 'on-call team'
+        $ag.properties.enabled = $false
+        $ag.properties.emailReceivers += [pscustomobject]@{ name = 'other'; emailAddress = 'other@contoso.com'; useCommonAlertSchema = $false }
+        $ag.properties | Add-Member -NotePropertyName smsReceivers -NotePropertyValue @(
+            [pscustomobject]@{ name = 'oncall'; countryCode = '1'; phoneNumber = '5550100' })
+        $ag.properties | Add-Member -NotePropertyName webhookReceivers -NotePropertyValue @(
+            [pscustomobject]@{ name = 'tickets'; serviceUri = 'https://tickets.example.test/hook'; useCommonAlertSchema = $true })
+        $global:Fake.Calls.Clear()
+        Mock Test-Bound { $true } -ParameterFilter { $Name -eq 'AdminEmail' }
+        Set-HealthAlerts 'new@contoso.com' 'eastus'
+        $put = @(Get-Calls '^rest --method PUT --url \S+/actionGroups/')
+        $put | Should -HaveCount 1
+        $body = $put[0].Body
+        $body.properties.emailReceivers[0].emailAddress | Should -Be 'new@contoso.com'
+        $body.properties.emailReceivers[1].emailAddress | Should -Be 'other@contoso.com'
+        $body.properties.smsReceivers[0].phoneNumber | Should -Be '5550100'
+        $body.properties.webhookReceivers[0].serviceUri | Should -Be 'https://tickets.example.test/hook'
+        $body.properties.enabled | Should -BeFalse
+        $body.tags.owner | Should -Be 'on-call team'
+    }
+}
+
+Describe 'Organization metadata across tenants' {
+    BeforeEach {
+        $script:TenantId = 'next-tenant'
+        $script:TenantName = 'Previous tenant'
+        $script:TenantDomain = 'previous.example'
+        $script:TenantDomains = @('previous.example')
+    }
+
+    It 'clears previous metadata when Graph refuses, and still checks the next mailbox' {
+        Mock Invoke-Rest { throw 'Mock Graph 403' } -ParameterFilter { $Url -like '*/organization' }
+        Mock Invoke-Rest { [pscustomobject]@{ value = @([pscustomobject]@{ userPrincipalName = 'security@next.example' }) } } `
+            -ParameterFilter { $Url -like '*/users' }
+        Read-Organization
+        $script:TenantName | Should -BeNullOrEmpty
+        $script:TenantDomain | Should -BeNullOrEmpty
+        $script:TenantDomains | Should -BeNullOrEmpty
+        { Test-AlertMailbox 'security@next.example' } | Should -Not -Throw
+        Should -Invoke Invoke-Rest -Times 1 -Exactly -ParameterFilter { $Url -like '*/users' }
+    }
+
+    It 'clears previous metadata when the organization list is empty' {
+        Mock Invoke-Rest { [pscustomobject]@{ value = @() } }
+        Read-Organization
+        $script:TenantName | Should -BeNullOrEmpty
+        $script:TenantDomain | Should -BeNullOrEmpty
+        $script:TenantDomains | Should -BeNullOrEmpty
+    }
+
+    It 'loads only the next organization after clearing the previous metadata' {
+        Mock Invoke-Rest { [pscustomobject]@{ value = @([pscustomobject]@{
+            displayName = 'Next tenant'; verifiedDomains = @([pscustomobject]@{
+                name = 'next.example'; isDefault = $true; isInitial = $false }) }) } }
+        Read-Organization
+        $script:TenantName | Should -Be 'Next tenant'
+        $script:TenantDomain | Should -Be 'next.example'
+        $script:TenantDomains | Should -Be @('next.example')
+    }
+}
+
 Describe 'Management UI sign-in app on a rerun' {
     BeforeAll {
         Mock Start-Sleep {}
