@@ -269,6 +269,9 @@ INBOX_RULE_KEYWORDS = _csv_env("INBOX_RULE_KEYWORDS", _DEFAULT_RULE_KEYWORDS)
 # Extra mail domains that count as internal for forwarding checks (for example
 # a second accepted domain). The domain of the acting user always counts.
 INTERNAL_DOMAINS = {d.lower() for d in _csv_env("INTERNAL_DOMAINS", "")}
+# The tenant's verified domains (install.ps1 writes them from Graph /organization on each run).
+# They count as internal too, so forwarding to a second accepted domain is not "external".
+TENANT_DOMAINS = {d.lower() for d in _csv_env("TENANT_DOMAINS", "")}
 
 # proxycheck.io answers in the cache. A clean answer (not a VPN, proxy, hosting, or Tor address,
 # risk under the threshold) is kept for IP_CACHE_DAYS: an office or home IP seldom changes, and

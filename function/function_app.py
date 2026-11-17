@@ -792,6 +792,13 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
                 ip_context = f"Source IP country {cc} is new for this user ({analysis['org']})"
                 finding["severity"] = "high"
         ip_context = "; ".join(t for t in (mfa_context.get(id(finding), ""), ip_context) if t)
+        # A rule that only deletes mail, from an IP that is not flagged: an email only with context.
+        if finding.get("needs_context") and finding["severity"] != "high":
+            quiet, context = _rule_review(finding, geo_table, now)
+            if quiet:
+                _record_not_alert(finding, events_table, processed_keys, now, "known sign-in", quiet)
+                continue
+            ip_context = "; ".join(t for t in (context, ip_context) if t)
 
         if _deliver_finding(finding, ip_context, events_table, processed_keys, geo_table, now,
                             ip_unchecked=ip_unchecked):
@@ -819,6 +826,39 @@ def mfa_method_change(finding: dict) -> bool:
     return finding.get("type") == "mfa_change" and event.get("Operation") == "Update user."
 
 
+def _prior_alert(account: str, finding: dict, since: datetime) -> Optional[dict]:
+    """The newest alert for ``account`` since ``since`` that sent email and that no admin marked Benign."""
+    rows = [r for r in journal.for_user(journal.table_client(), account, since, exclude_key=finding_key(finding))
+            if r["status"] in ("emailed", "email failed") and r["triage"] != "benign"]
+    return rows[0] if rows else None
+
+
+RULE_SIGNIN_HOURS = 24
+
+
+def _rule_review(finding: dict, geo_table, now: datetime) -> tuple:
+    """(quiet reason, alert context) for an inbox rule that only deletes mail.
+
+    Alert (high) when the user had another alert in the MFA_PRIOR_DAYS before, or signed in from
+    a network that they did not use before in the RULE_SIGNIN_HOURS before the rule. Else no email.
+    Unlike an MFA change, a rule needs no new sign-in, so "no sign-in seen" is not a reason to alert.
+    """
+    user = str(finding.get("user") or "").strip()
+    when = journal.event_time(finding.get("event") or {}, now)
+    prior = _prior_alert(user, finding, when - timedelta(days=MFA_PRIOR_DAYS))
+    if prior:
+        finding["severity"] = "high"
+        return "", (f"The user had another alert in the {MFA_PRIOR_DAYS} days before: "
+                    f"{short_title(prior['type'])} ({prior['at']})")
+    seen = signin_networks.near(geo_table, user, when, before=timedelta(hours=RULE_SIGNIN_HOURS))
+    if seen["history"] and seen["new"]:
+        finding["severity"] = "high"
+        return "", (f"The user signed in from {seen['new'][0]}, a network not used before, in the "
+                    f"{RULE_SIGNIN_HOURS} hours before the rule")
+    return (f"No email: the rule only deletes mail, the user had no other alert in the {MFA_PRIOR_DAYS} days "
+            f"before and no sign-in from a new network in the {RULE_SIGNIN_HOURS} hours before"), ""
+
+
 def _mfa_review(finding: dict, geo_table, now: datetime) -> tuple:
     """(quiet reason, alert context) for an MFA method change on one account.
 
@@ -836,13 +876,12 @@ def _mfa_review(finding: dict, geo_table, now: datetime) -> tuple:
     when = journal.event_time(finding.get("event") or {}, now)
     since = when - timedelta(days=MFA_PRIOR_DAYS)
     for account in [user] + ([actor] if admin else []):
-        prior = [r for r in journal.for_user(journal.table_client(), account, since, exclude_key=finding_key(finding))
-                 if r["status"] in ("emailed", "email failed") and r["triage"] != "benign"]
+        prior = _prior_alert(account, finding, since)
         if prior:
             finding["severity"] = "high"
             name = "the user" if account == user else account
             return "", (f"{name[0].upper() + name[1:]} had another alert in the {MFA_PRIOR_DAYS} days before: "
-                        f"{short_title(prior[0]['type'])} ({prior[0]['at']})")
+                        f"{short_title(prior['type'])} ({prior['at']})")
     seen = signin_networks.near(geo_table, signer, when)
     if not seen["history"]:
         return "", ""

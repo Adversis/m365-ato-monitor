@@ -15,6 +15,9 @@ user:
   nets    {network: [first sign-in, last sign-in]}, kept NETWORK_DAYS after the last
   recent  [[time, ip], ...]: the sign-ins of the last RECENT_HOURS, newest last
 
+The inbox rule check reads it too: a rule that only deletes mail alerts only after a sign-in
+from a new network in the 24 hours before (or another alert for the user).
+
 No function raises. Without storage, ``record`` does nothing and ``near`` says that
 there is no history.
 """
@@ -125,8 +128,8 @@ def _record_user(table, user: str, signins: list, now: datetime) -> None:
     })
 
 
-def near(table, upn: str, when: datetime) -> dict:
-    """The user's sign-ins from WINDOW_BEFORE before ``when`` to WINDOW_AFTER after it.
+def near(table, upn: str, when: datetime, before: timedelta = WINDOW_BEFORE) -> dict:
+    """The user's sign-ins from ``before`` before ``when`` to WINDOW_AFTER after it.
 
     Returns {"history": bool, "ips": [...], "new": [...]}. ``history`` is False when the
     user's row is younger than LEARN_DAYS before the window (or storage failed): a network
@@ -141,9 +144,9 @@ def near(table, upn: str, when: datetime) -> dict:
     except Exception as e:
         logging.warning(f"Sign-in networks not read: {type(e).__name__}")
         return empty
-    start, end = _iso(when - WINDOW_BEFORE), _iso(when + WINDOW_AFTER)
+    start, end = _iso(when - before), _iso(when + WINDOW_AFTER)
     try:
-        history = bool(row.get("since")) and _time(row["since"]) <= when - WINDOW_BEFORE - timedelta(days=LEARN_DAYS)
+        history = bool(row.get("since")) and _time(row["since"]) <= when - before - timedelta(days=LEARN_DAYS)
     except ValueError:
         history = False
     ips, new = [], []

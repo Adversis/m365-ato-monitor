@@ -19,6 +19,7 @@ HOME = "198.51.100.20"        # the user's usual network
 HOME_NEW_ADDR = "198.51.100.77"
 NEW = "203.0.113.9"           # a network the user did not use before
 ADMIN = "admin@contoso.com"
+RULE_IP = "81.2.69.160"       # a public test address (MaxMind test data), not a real client
 
 
 def _t(dt):
@@ -159,3 +160,58 @@ class TestReview:
                 patch("function_app.send_compromise_alert", return_value=True) as send:
             fa._run_compromise_check(FakeTable(), None, set(), [mfa_record(now - timedelta(minutes=5), ADMIN)])
         assert send.called
+
+
+class TestDeleteOnlyRule:
+    """An inbox rule that only deletes mail: email only after another alert or a new-network sign-in."""
+
+    def _rule(self, when, **params):
+        props = {"RuleName": "Newsletters", "RuleOperation": "AddMailboxRule",
+                 "RuleActions": json.dumps([{"ActionType": "Delete"}]), **params}
+        return {"Id": f"rule-{_t(when)}", "Operation": "UpdateInboxRules", "RecordType": 2, "Workload": "Exchange",
+                "ResultStatus": "Succeeded", "CreationTime": _t(when), "UserId": USER, "MailboxOwnerUPN": USER,
+                "ClientIP": RULE_IP, "ClientInfoString": "Client=MSExchangeRPC",
+                "OperationProperties": [{"Name": k, "Value": v} for k, v in props.items()]}
+
+    def _run(self, signins=(), prior=None, ip_data=None, **params):
+        now = datetime.now(timezone.utc)
+        created = now - timedelta(minutes=5)
+        geo, jt = FakeTable(), FakeTable()
+        sn.record(geo, [signin(HOME, now - timedelta(days=30))], now - timedelta(days=30))
+        sn.record(geo, [signin(ip, created - timedelta(hours=h)) for ip, h in signins], now)
+        if prior:
+            journal.record(jt, {"type": prior, "severity": "medium", "user": USER, "description": "d",
+                                "event": {"CreationTime": _t(now - timedelta(days=1))}}, "k-prior", "emailed", now=now)
+        clean = {"isocode": "US", "asn": "AS64500", "organisation": "Home ISP", "proxy": "no", "type": "Residential"}
+        with patch("geo_monitor.table_client", return_value=geo), \
+                patch("geo_monitor.is_unusual", return_value=False), \
+                patch("journal.table_client", return_value=jt), \
+                patch("function_app.check_ips_batch", return_value={RULE_IP: ip_data or clean}), \
+                patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_compromise_check(FakeTable(), None, set(), [self._rule(created, **params)])
+        rows = [r for r in journal.for_user(jt, USER, now - timedelta(days=1)) if r["type"] == "inbox_rule"]
+        return send, rows
+
+    def test_no_context_sends_no_email(self):
+        send, rows = self._run(signins=[(HOME_NEW_ADDR, 2)])
+        assert not send.called and rows[0]["status"] == "known sign-in"
+
+    def test_new_network_sign_in_alerts_high(self):
+        send, _ = self._run(signins=[(NEW, 20)])
+        finding, context = send.call_args.args[:2]
+        assert finding["severity"] == "high" and NEW in context
+
+    def test_prior_alert_alerts_high(self):
+        send, _ = self._run(prior="suspicious_signin")
+        finding, context = send.call_args.args[:2]
+        assert finding["severity"] == "high" and "Suspicious sign-in" in context
+
+    def test_flagged_rule_ip_still_alerts(self):
+        vpn = {"isocode": "NL", "asn": "AS64501", "organisation": "Some VPN", "proxy": "yes", "type": "VPN", "risk": 80}
+        send, _ = self._run(ip_data=vpn)
+        assert send.call_args.args[0]["severity"] == "high"
+
+    def test_delete_with_another_sign_is_not_gated(self):
+        # Deletes mail about payments: the classic way to hide a fraud reply. Always high.
+        send, _ = self._run(RuleCondition="{(Subject Contains 'invoice')}")
+        assert send.called and send.call_args.args[0]["severity"] == "high"

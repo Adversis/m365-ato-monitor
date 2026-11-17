@@ -534,6 +534,10 @@ Describe 'Install on an empty subscription' {
         (Get-Calls '^functionapp deployment source config-zip').Count | Should -Be 1
     }
 
+    It 'writes the verified domains (TENANT_DOMAINS), so a second domain is internal' {
+        $global:Fake.Created.settings['TENANT_DOMAINS'] -split ',' | Should -Contain 'contoso.com'
+    }
+
     It 'records the grants of this run for the monitor (INSTALL_GRANTS)' {
         $v = $global:Fake.Created.settings['INSTALL_GRANTS']
         $v | Should -Match '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ;admin@contoso\.com;'

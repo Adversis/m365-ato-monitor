@@ -1718,6 +1718,9 @@ function Install-Monitor {
     if (-not $existing['ADMIN_EMAIL'] -or $AdminEmail) { $settings.ADMIN_EMAIL = $email }
     $made = @($script:GrantsMade | Where-Object { $_.Sp -eq $monitor.Sp.id } | ForEach-Object { $_.Role } | Select-Object -Unique)
     if ($made.Count -and -not $DryRun) { $settings.INSTALL_GRANTS = New-InstallGrantsSetting $existing['INSTALL_GRANTS'] $made }
+    # The verified domains count as internal (forwarding to a second domain is not "external").
+    # Empty if Graph refused /organization: the setting keeps its value.
+    if (@($script:TenantDomains).Count) { $settings.TENANT_DOMAINS = (@($script:TenantDomains) -join ',') }
     # More than one tenant (-Tenant): the organization name in the subjects, [M365 Alert][Contoso].
     if ($Tenant -and $script:TenantName -and -not $existing['TENANT_LABEL']) { $settings.TENANT_LABEL = $script:TenantName }
     Wait-RoleApplied 'Monitoring Metrics Publisher' $script:Ai.id 'the app sends telemetry with the managed identity'

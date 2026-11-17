@@ -365,7 +365,8 @@ class TestMailboxRules:
     @pytest.mark.parametrize("rule,folder,severity", [
         (_rule(forwardTo=[{"emailAddress": {"address": "x@evil.example"}}]), "", "high"),
         (_rule(forwardTo=[{"emailAddress": {"address": "boss@contoso.com"}}]), "", ""),
-        (_rule(delete=True, conditions={"senderContains": ["news"]}), "", "high"),
+        (_rule(delete=True, conditions={"senderContains": ["news"]}), "", ""),          # only deletes: no sign
+        (_rule(delete=True, conditions={"subjectContains": ["invoice"]}), "", "high"),  # deletes payment mail
         (_rule(moveToFolder="f1", conditions={"subjectContains": ["x"]}), "RSS Feeds", "high"),
         (_rule(markAsRead=True, conditions={"subjectContains": ["Invoice"]}), "", "medium"),
         (_rule(name="..", moveToFolder="f1"), "Projects", "medium"),

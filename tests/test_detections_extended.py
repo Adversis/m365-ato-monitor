@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import compromise_detector as cd
+import config
 
 
 def _params(**kv):
@@ -188,6 +189,30 @@ class TestMailboxDelegation:
         assert cd.detect_mailbox_delegation([event]) == []
         event["UserId"] = "admin@contoso.com"
         _one(cd.detect_mailbox_delegation([event]), "mailbox_delegation", "medium")
+
+    @staticmethod
+    def _group_folder_share(user_id, member):
+        # The shape of a real record (made-up values): Exchange sets up a Microsoft 365 group mailbox.
+        return {"Operation": "ModifyFolderPermissions", "RecordType": 2, "Workload": "Exchange",
+                "ResultStatus": "Succeeded", "UserType": 2, "UserId": user_id, "LogonUserSid": user_id,
+                "ClientIP": "::1", "ClientInfoString": "Client=WebServices;Action=ConfigureGroupMailbox",
+                "MailboxOwnerUPN": "projects@contoso.com", "CreationTime": "2026-11-17T14:34:51",
+                "Item": {"ParentFolder": {"Name": "Team Chat", "Path": "\\Conversation History\\Team Chat",
+                                          "MemberUpn": member, "MemberSid": "S-1-8-1-2-3-4-0",
+                                          "MemberRights": "ReadAny, Create, EditOwned, Visible"}}}
+
+    def test_group_mailbox_setup_ignored(self):
+        # Regression: "Folder '\Conversation History\Team Chat' was shared with Owner@local".
+        service = "S-1-5-80-1111111111-2222222222-3333333333-4444444444-5555555555"
+        assert cd.detect_mailbox_delegation([self._group_folder_share(service, "Owner@local")]) == []
+        # Owner@local and Member@local are the group's owners and members, not outside addresses.
+        assert cd.detect_mailbox_delegation([self._group_folder_share("admin@contoso.com", "Member@local")]) == []
+        # A person who shares the folder outside still alerts, and so does a service SID's look-alike
+        # that is a user SID.
+        _one(cd.detect_mailbox_delegation([self._group_folder_share("admin@contoso.com", "x@fabrikam.com")]),
+             "mailbox_delegation", "medium")
+        _one(cd.detect_mailbox_delegation([self._group_folder_share("S-1-5-21-1-2-3-500", "x@fabrikam.com")]),
+             "mailbox_delegation", "medium")
 
     def test_send_as(self):
         _one(cd.detect_mailbox_delegation([_cmdlet("Add-RecipientPermission", Identity="cfo@contoso.com",
@@ -450,3 +475,46 @@ class TestDirectSend:
     def test_protection_turned_on_ignored(self):
         assert cd.detect_mail_protection_weakened([_cmdlet("Set-OrganizationConfig", RejectDirectSend="True")]) == []
         assert cd.detect_mail_protection_weakened([_cmdlet("Set-OrganizationConfig", AuditDisabled="False")]) == []
+
+
+# ---------------------------------------------------------------------------
+# False positives from service actors and the tenant's own domains
+# ---------------------------------------------------------------------------
+
+class TestTenantDomainsAndServiceActors:
+    """A second verified domain is internal; Exchange service accounts are skipped in every detector."""
+
+    def test_second_tenant_domain_is_internal(self, monkeypatch):
+        event = _cmdlet("Set-Mailbox", actor="admin@contoso.com", Identity="sam@contoso.com",
+                        ForwardingSmtpAddress="smtp:sam@contoso-brand.com")
+        assert _one(cd.detect_mailbox_forwarding([event]), "mailbox_forwarding", "high")
+        monkeypatch.setattr(config, "TENANT_DOMAINS", {"contoso.com", "contoso-brand.com"})
+        _one(cd.detect_mailbox_forwarding([event]), "mailbox_forwarding", "medium")    # still a forwarding change
+        rule = _cmdlet("New-InboxRule", actor="sam@contoso.com", Name="copy", ForwardTo="sam@contoso-brand.com")
+        assert cd.detect_suspicious_inbox_rules([rule]) == []
+
+    def test_sid_actor_uses_the_mailbox_owner_domain(self):
+        # A mailbox audit record whose actor is a user SID: the owner's domain decides what is internal.
+        rule = {"Operation": "UpdateInboxRules", "RecordType": 2, "Workload": "Exchange",
+                "UserId": "S-1-5-21-1-2-3-1001", "MailboxOwnerUPN": "sam@contoso.com", "ClientIP": "198.51.100.7",
+                "OperationProperties": [{"Name": "RuleName", "Value": "team"},
+                                        {"Name": "RuleActions", "Value": json.dumps(
+                                            [{"ActionType": "Forward", "Recipients": ["lee@contoso.com"]}])}]}
+        assert cd.detect_suspicious_inbox_rules([rule]) == []
+        rule["OperationProperties"][1]["Value"] = json.dumps([{"ActionType": "Forward",
+                                                               "Recipients": ["x@fabrikam.com"]}])
+        _one(cd.detect_suspicious_inbox_rules([rule]), "inbox_rule", "high")
+
+    @pytest.mark.parametrize("actor", ["NT AUTHORITY\\SYSTEM (w3wp)", "S-1-5-80-1-2-3-4-5", "S-1-5-18"])
+    def test_exchange_service_skipped_in_all_detectors(self, actor):
+        events = [_cmdlet("Set-Mailbox", actor=actor, Identity="sam@contoso.com",
+                          ForwardingSmtpAddress="smtp:x@fabrikam.com"),
+                  _cmdlet("New-TransportRule", actor=actor, Name="r", BlindCopyTo="x@fabrikam.com"),
+                  _cmdlet("Set-Mailbox", actor=actor, Identity="sam@contoso.com", AuditEnabled="False")]
+        for detect in (cd.detect_mailbox_forwarding, cd.detect_mail_flow_rules, cd.detect_audit_disabled):
+            assert detect(events) == []
+
+    def test_entra_service_principal_is_not_skipped(self):
+        # In Entra ID records UserType 4 is a service principal (the MFA service): not an Exchange service.
+        event = _aad("Disable Strong Authentication.", actor="ServicePrincipal_1", UserType=4)
+        _one(cd.detect_mfa_changes([event]), "mfa_change", "high")

@@ -58,6 +58,8 @@ By default, a mail flow rule causes an alert only if it copies, redirects, or de
 2. In the **Triage** column of the alert, select **Investigating**, **Benign** (expected, not an attack), or **Resolved** (an attack that you handled).
 3. Enter a note if you want, for example who confirmed it. Select **Save**.
 
+To set more than one alert of a user: on **Users** > the user, select the alerts with the boxes in the first column (the box in the header selects the page), select a state above the list, then **Set triage**. One note applies to all of them.
+
 The Alerts view shows open and investigating alerts first; select **Triage** > **All** or one state to see the others. Triage changes only the list: later alerts for the same user or rule still send email (to stop them, use a mute). History records each change. Long lists have pages: use **Previous** and **Next**.
 
 The Overview shows the state as a tag on each recent alert (**Investigating**, **Benign**, or **Resolved**), with the note. Benign and resolved alerts are dimmed. An automatic response shows as "Response: ..." under the alert.
@@ -290,7 +292,7 @@ Single IPs and CIDR ranges are both valid. The app ignores and logs an entry tha
 
 ## Add internal mail domains
 
-The forwarding checks (inbox rules, mailbox forwarding, mail flow rules, folder sharing) treat the acting user's mail domain as internal. Forwarding to another domain causes an alert. If the tenant has more than one accepted domain, add the others. Include the `onmicrosoft.com` domain if admins use it:
+The forwarding checks (inbox rules, mailbox forwarding, mail flow rules, folder sharing) treat as internal the acting user's mail domain and the tenant's verified domains (including `onmicrosoft.com`). `install.ps1` reads the verified domains on each run (app setting `TENANT_DOMAINS`). After you add a domain to the tenant, run `./install.ps1 -Update`, or add the domain here. Forwarding to another domain causes an alert. For a domain outside the tenant that counts as internal (for example a sister company):
 
 1. Management UI > Settings > Allowlists > **Internal mail domains**.
 2. Add one domain per line, for example `contoso.onmicrosoft.com`.

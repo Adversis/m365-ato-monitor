@@ -218,7 +218,7 @@ Sign-in uses Entra ID. The person who runs the install can open the page. To giv
 
 | Detection | Examples | Severity |
 | --- | --- | --- |
-| Inbox rules | Forward to an external address; forward to an unverified directory recipient (medium); delete mail or move it to a folder that users seldom open; a rule named `..` | High or medium |
+| Inbox rules | Forward to an external address; forward to an unverified directory recipient (medium); move mail to a folder that users seldom open; hide mail about payments or security; a rule named `..`. A rule that only deletes mail sends email only after another alert for the user, from a flagged IP, or after a sign-in from a new network in the 24 hours before | High or medium |
 | Mailbox forwarding | Forwarding to an external address (high) or an internal address (medium) | High or medium |
 | Mail flow (transport) rules | External BCC or redirect; skip spam filtering | High or medium |
 | OAuth consent | An app gets mailbox, file, or directory access, such as `Mail.Read` or `full_access_as_app` | High |

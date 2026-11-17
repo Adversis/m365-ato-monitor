@@ -8,7 +8,8 @@ Graph shows the server-side rules of a mailbox. Rules that only Outlook
 desktop runs (client-only rules) are not shown.
 
 The assessment uses the same signs as the audit-record detector
-(compromise_detector): external forwarding or delete is high; a keyword
+(compromise_detector): external forwarding, or delete with another sign, is high
+(a rule that only deletes mail is no sign); a keyword
 condition with mark-as-read, move, or delete, or a name with no letters, is
 medium. A rule holds the ID of its move target, not the name. Reading the
 folder name needs a Mail permission, which the app does not have, so a move
@@ -133,6 +134,10 @@ def assess(rule: dict, mailbox: str, folder: str = "") -> tuple:
     name_note = _rule_name_indicator(str(rule.get("displayName") or ""), hides)
     if name_note:
         weak.insert(0, name_note)
+    # A rule that only deletes mail (newsletters, notifications) is common and alone no sign of an
+    # attack. The alert for a new one needs context (function_app._rule_review); an existing one has none.
+    if strong == ["deletes matching messages"] and not weak:
+        return "", []
     return ("high" if strong else "medium" if weak else ""), strong + weak
 
 

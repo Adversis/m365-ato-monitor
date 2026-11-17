@@ -340,6 +340,8 @@ Subject: `[M365 Alert] HIGH: Inbox rule - <user>` (or MEDIUM). Email title: "Sus
 - The alert lists what the rule does (Actions) and for which mail (Conditions). For a rule that the onboarding scan found, the email has no audit record: open the rule on the user page (Management UI > Users > the user > Inbox rules).
 - Look next: `Get-InboxRule -Mailbox <upn> -IncludeHidden`. Microsoft Purview > Audit: the user's `UserLoggedIn` records in the hours before the rule.
 
+A rule that only deletes mail (no forward, no hidden folder, no payment or security words) sends email only with context: another alert for the user in the 7 days before, a flagged rule IP, or a sign-in from a new network in the 24 hours before. The alert names the context. Without it, the rule is in the alert list as "Known sign-in", with no email.
+
 **Common benign causes.** The user moves newsletters to RSS Feeds or deletes mail from one sender. The user forwards to a personal address (a policy problem and a data leak, but not an attack). A rule for an assistant. A migration or archive tool (EWS).
 
 **If real.**
@@ -348,7 +350,7 @@ Subject: `[M365 Alert] HIGH: Inbox rule - <user>` (or MEDIUM). Email title: "Sus
 - [Contain the account](#contain-an-account) in `UserId`.
 - With **Turn off malicious inbox rules**, the notice says "inbox rule turned off". The monitor keeps the rule, turned off. Remove it after you record the details.
 
-**If benign.** If the forward address is in another domain of your organization, add the domain to **Internal mail domains**. If the monitor turned off a legitimate rule, turn it on again in Outlook. For a confirmed rule that alerts again, see [Options](#options-for-expected-alerts).
+**If benign.** The tenant's verified domains are internal. If the forward address is in a domain outside the tenant that belongs to your organization, add the domain to **Internal mail domains**. If the monitor turned off a legitimate rule, turn it on again in Outlook. For a confirmed rule that alerts again, see [Options](#options-for-expected-alerts).
 
 **Severity.** High: forwards or redirects to an external address; deletes; moves to a hidden folder (Deleted Items, RSS Feeds, RSS Subscriptions, Junk Email, Conversation History, Calendar); or was made with an attack tool or automation library. Medium: a name with no letters or digits; a 1–2 character name on a rule that hides mail; a listed keyword with mark-as-read, move, or delete.
 
@@ -371,7 +373,7 @@ Subject: `[M365 Alert] HIGH: Mailbox forwarding - <user>` (or MEDIUM). Email tit
 
 By default, the outbound spam policy blocks automatic forwarding to external addresses. Do not rely on it. An admin can allow it, and the monitor then sends a [Mail protection](#mail_protection_weakened) alert.
 
-**If benign.** If the forward address is in another domain of your organization, add the domain to **Internal mail domains**.
+**If benign.** The tenant's verified domains are internal. If the forward address is in a domain outside the tenant that belongs to your organization, add the domain to **Internal mail domains**.
 
 **Severity.** High if the address is external. Medium for an internal recipient.
 

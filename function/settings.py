@@ -240,8 +240,8 @@ SETTINGS = (
             "session, and compromise alerts still apply. Attackers can rent mobile carrier IPs.",
             "asn_list", risky=("*",)),
     Setting("INTERNAL_DOMAINS", "allow", "Internal mail domains",
-            "One per line. Forwarding to these domains is not external. The user's own domain is "
-            "always internal.", "domain_list", risky=("*",)),
+            "One per line. Forwarding to these domains is not external. The user's own domain and "
+            "the tenant's verified domains (read by install.ps1) are always internal.", "domain_list", risky=("*",)),
 
     Setting("HIGH_RISK_OAUTH_SCOPES", "detection", "High-risk OAuth scopes",
             "One per line. A consent that grants one of these causes an alert.", "word_list"),

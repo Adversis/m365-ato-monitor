@@ -97,6 +97,9 @@ def _run(events: list, check: Callable[[dict], Optional[dict]], include_failed: 
             continue
         if not include_failed and str(event.get("ResultStatus", "")).strip().lower() in _FAILED_STATUS:
             continue
+        # Exchange's own service accounts (provisioning, group mailbox setup): no user acts as them.
+        if _is_exchange_record(event) and _is_system_actor(event):
+            continue
         try:
             finding = check(event)
         except Exception as e:
@@ -131,7 +134,12 @@ def _user_domain(user: str) -> str:
 
 
 def _is_internal(domain: str, user_domain: str) -> bool:
-    return domain == user_domain or domain in config.INTERNAL_DOMAINS
+    return domain == user_domain or domain in config.INTERNAL_DOMAINS or domain in config.TENANT_DOMAINS
+
+
+def _event_domain(event: dict) -> str:
+    """The acting user's domain, or the mailbox owner's when the actor is a SID or a service."""
+    return _user_domain(_user(event)) or _user_domain(str(event.get("MailboxOwnerUPN") or ""))
 
 
 # An X.500 address (legacyExchangeDN) of a recipient in the tenant's directory, as Outlook writes
@@ -206,13 +214,22 @@ def _is_system_actor(event: dict) -> bool:
     UserType 3 (DCAdmin) and 4 (System), "NT AUTHORITY\\SYSTEM (...)", Windows
     service accounts such as "NT SERVICE\\MSExchangeAdminApiNetCore (...)" (it
     grants Discovery Management FullAccess on the DiscoverySearchMailbox again
-    and again), and the service SIDs S-1-5-18, -19, -20. No user or app of the
-    tenant can act as these accounts. The Graph audit search can name the
+    and again), the service SIDs S-1-5-18, -19, -20, and S-1-5-80-... (the SID form
+    of "NT SERVICE\\<name>"; for example the service that sets up a Microsoft 365
+    group mailbox, Action=ConfigureGroupMailbox). No user or app of the tenant can
+    act as these accounts. The Graph audit search can name the
     UserType ("DcAdmin", "System") where the Management API uses the number.
     """
     actor = str(event.get("UserId") or "").strip().upper()
-    return (actor.startswith(("NT AUTHORITY\\", "NT SERVICE\\")) or actor in _SERVICE_SIDS
+    return (actor.startswith(("NT AUTHORITY\\", "NT SERVICE\\", "S-1-5-80-")) or actor in _SERVICE_SIDS
             or str(event.get("UserType")).strip().lower() in ("3", "4", "dcadmin", "system"))
+
+
+def _is_exchange_record(event: dict) -> bool:
+    """An Exchange admin (cmdlet) or mailbox audit record. In Entra ID records, UserType 4 is
+    a service principal (for example the MFA service), which must not be skipped."""
+    return (str(event.get("Workload") or "").lower() == "exchange"
+            or str(event.get("RecordType")).strip() in ("1", "2"))
 
 
 # Local System, Local Service, Network Service. A user SID is S-1-5-21-...
@@ -303,16 +320,20 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
 
     params = _extract_parameters(event)
     user = _user(event)
-    user_domain = _user_domain(user)
+    user_domain = _event_domain(event)
     mailbox = _rule_mailbox(event, params, operation) or user
     confirm_first = False
 
     if operation == "UpdateInboxRules":
         name = str(params.get("RuleName") or params.get("Name") or "")
         strong = _update_inbox_rules_indicators(params, user_domain)
-        weak = []
         actions = " ".join(str(params.get(k) or "") for k in ("RuleActions", "Actions")).lower()
         hides = any(word in actions for word in ("move", "delete", "read"))
+        # The condition text ("{(Subject Contains 'invoice')}"), or the whole rule for EWS (ServerRule).
+        condition = " ".join(str(params.get(k) or "") for k in ("RuleCondition", "ServerRule")).lower()
+        words = [w for w in config.INBOX_RULE_KEYWORDS if w and w.lower() in condition]
+        weak = ([f"matches mail that contains {', '.join(repr(w) for w in words[:5])} and hides it"]
+                if words and hides else [])
     else:
         # Set-InboxRule has Name only for a rename. Identity (and ObjectId) is
         # "mailbox\\rule name" or ".../mailbox/rule name".
@@ -337,6 +358,9 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
 
     if not strong and not weak:
         return None
+    # A rule that only deletes mail (for example newsletters) is common and alone not a sign of an
+    # attack. function_app sends it only after another alert or a sign-in from a new network.
+    delete_only = strong == ["deletes matching messages"] and not weak
 
     # External recipients, so a response can find the rule in the mailbox.
     if operation == "UpdateInboxRules":
@@ -348,7 +372,7 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
 
     return {
         "type": "inbox_rule",
-        "severity": "high" if strong else "medium",
+        "severity": "high" if strong and not delete_only else "medium",
         "user": user,
         "description": (f"Inbox rule '{name or 'Unknown'}' ({operation}) {_join(strong + weak)}."
                         + (f" {cmdlet_rule_summary(params)}" if operation != "UpdateInboxRules"
@@ -360,6 +384,7 @@ def _inbox_rule_finding(event: dict) -> Optional[dict]:
         "target": mailbox,
         "targets": targets,
         "confirm_first": confirm_first,
+        **({"needs_context": True} if delete_only else {}),
     }
 
 
@@ -620,7 +645,7 @@ def _mailbox_forwarding_finding(event: dict) -> Optional[dict]:
 
     params = _extract_parameters(event)
     user = _user(event)
-    user_domain = _user_domain(user)
+    user_domain = _event_domain(event)
     # The mailbox that was changed. It is not always the account that ran Set-Mailbox.
     mailbox = str(params.get("Identity") or event.get("ObjectId") or "").strip()[:300] or user
 
@@ -976,7 +1001,7 @@ def _mail_flow_rule_finding(event: dict) -> Optional[dict]:
         return None
     params = _extract_parameters(event)
     actor = _user(event)
-    domain = _user_domain(actor)
+    domain = _event_domain(event)
     name = params.get("Name") or params.get("Identity") or event.get("ObjectId") or "Unknown"
 
     high = []
@@ -1039,7 +1064,9 @@ def _folder_share_text(folder: str, member: str, rights: str, actor: str) -> Opt
         return None  # calendar sharing is normal
     if not any(r.lower() in _READ_FOLDER_RIGHTS for r in re.split(r"[\s,;]+", rights.strip("[]")) if r):
         return None
-    external = _external_targets(member, _user_domain(actor)) if "@" in member else []
+    # "Owner@local" and "Member@local": the owners and members of a Microsoft 365 group, not addresses.
+    external = (_external_targets(member, _user_domain(actor))
+                if "@" in member and not member.lower().endswith("@local") else [])
     if member.lower() not in _EVERYONE and not external:
         return None
     who = ("everyone in the organization" if member.lower() in ("default", "everyone")
