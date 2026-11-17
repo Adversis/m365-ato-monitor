@@ -17,6 +17,9 @@ user:
   recent  [[start, end, ip], ...]: the sign-ins of the last RECENT_HOURS, as time ranges per IP
   updated the last write; the weekly clean-up deletes rows with no write in NETWORK_DAYS
 
+network_backfill.py loads the sign-ins of the last 30 days from the audit log once, so that
+the history is complete soon after an install (or the update that adds the backfill).
+
 The inbox rule check reads it too: a rule that only deletes mail alerts only after a sign-in
 from a new network in the 24 hours before (or another alert for the user).
 
@@ -101,10 +104,14 @@ _LAST_STEP = timedelta(days=1)         # "last" only serves the NETWORK_DAYS cle
 _MAX_FAILURES = 3                      # storage is down: stop for this run instead of N failing calls
 
 
-def record(table, login_records: list, now: datetime) -> None:
-    """Add the successful sign-ins (UserLoggedIn) of ``login_records`` to each user's row."""
+def record(table, login_records: list, now: datetime, since: Optional[datetime] = None) -> bool:
+    """Add the successful sign-ins (UserLoggedIn) of ``login_records`` to each user's row.
+
+    ``since``: the start of the period that ``login_records`` covers completely (the backfill of
+    past sign-ins). A row that gets sign-ins here starts no later than it. False if a write failed.
+    """
     if table is None:
-        return
+        return False
     by_user = {}
     for r in login_records:
         if not isinstance(r, dict) or r.get("Operation") != "UserLoggedIn":
@@ -117,18 +124,20 @@ def record(table, login_records: list, now: datetime) -> None:
             continue
         if "@" in user and net:
             by_user.setdefault(user, []).append((when, ip, net))
-    failed = 0
+    failed, ok = 0, True
     for user, signins in by_user.items():
         try:
-            _record_user(table, user, signins, now)
+            _record_user(table, user, signins, now, since)
             failed = 0
         except Exception as e:
             failed += 1
+            ok = False
             _rows.pop(user, None)
             logging.warning(f"Sign-in networks not kept: {type(e).__name__}")
             if failed >= _MAX_FAILURES:
                 logging.warning(f"Sign-in networks: {failed} failures in a row, the rest of this batch is skipped")
-                return
+                return False
+    return ok
 
 
 def _ranges(recent: list) -> list:
@@ -180,17 +189,20 @@ def _merge(row: dict, signins: list, now: datetime) -> tuple:
     return kept, recent2, changed
 
 
-def _record_user(table, user: str, signins: list, now: datetime) -> None:
+def _record_user(table, user: str, signins: list, now: datetime, since: Optional[datetime] = None) -> None:
     for attempt in range(2):
         row = _rows.get(user) if attempt == 0 else None
         if row is None:
             row = _load(table, user)
         nets, recent, changed = _merge(row, signins, now)
+        start = row.get("since") or _iso(now)
+        if since is not None and _iso(since) < start:
+            start, changed = _iso(since), True
         if not changed:
             _rows[user] = row
             return
         entity = {"PartitionKey": _PARTITION, "RowKey": _key(user), "upn": user,
-                  "since": row.get("since") or _iso(now), "updated": _iso(now),
+                  "since": start, "updated": _iso(now),
                   "nets": json.dumps(nets, sort_keys=True), "recent": json.dumps(recent)}
         try:
             if row.get("etag"):

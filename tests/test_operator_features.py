@@ -528,9 +528,14 @@ class TestOnboarding:
         state["step"] = "done"
         onboarding._save(events, state)
         with patch("function_app._get_table_clients", return_value=(events, FakeTable())), \
-                patch("onboarding.run") as run:
+                patch("onboarding.run") as run, patch("network_backfill.run") as backfill:
             fa.background_jobs(None)
-        run.assert_not_called()
+            run.assert_not_called()
+            backfill.assert_called_once()            # the network backfill did not finish yet
+            events.upsert_entity({"PartitionKey": "system", "RowKey": "networkbackfill",
+                                  "data": '{"finished_at": "2026-01-01T00:00:00Z"}'})
+            fa.background_jobs(None)
+            backfill.assert_called_once()            # both jobs done: idle
 
     def test_report_renders(self):
         import onboarding

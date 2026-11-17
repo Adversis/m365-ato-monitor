@@ -24,6 +24,7 @@ import config
 import geo_monitor
 import journal
 import mail_access
+import network_backfill
 import responder
 # Fixed at deployment (environment). Tunable settings are read as config.X at
 # call time, because the management UI can change them between runs.
@@ -778,6 +779,11 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     sent_count = 0
     failed = False
     for finding in new_findings:
+        if finding.get("list_only"):
+            # An alert in the list with no email and no response (for example an MFA reset).
+            _record_not_alert(finding, events_table, processed_keys, now, "list only",
+                              "Listed, no email: this kind of change is common and is shown as context")
+            continue
         ip_context = ""
         ip = finding.get("ip")
         # A failed lookup (quota, timeout) leaves the finding medium. A mute must not hide it.
@@ -869,16 +875,26 @@ def _mfa_networks(finding: dict, geo_table, now: datetime) -> tuple:
 
     The person who signed in is the user (My Sign-ins; the MFA service writes the record) or,
     for an admin who changed another user's methods, the admin. A sign-in from a network that
-    the person did not use before, no sign-in seen, or too little history: alert. Sets the
+    the person did not use before, or no sign-in seen: alert. Too little history (the learning
+    period, LEARN_DAYS): no email, unless another alert (in _context_review). Sets the
     finding's IP to the new network's IP, so that the IP check also runs on it. ``wait``: the
     result can change when a late sign-in record arrives (no email, or no sign-in seen).
     """
     _, signer, admin = _accounts(finding)
     who = signer if admin else "the user"
-    seen = signin_networks.near(signin_networks.view(geo_table, signer),
-                                journal.event_time(finding.get("event") or {}, now))
+    row = signin_networks.view(geo_table, signer)
+    seen = signin_networks.near(row, journal.event_time(finding.get("event") or {}, now))
+    if not row:
+        # No sign-in of this person in the history at all (for example an admin of a partner
+        # tenant, whose sign-ins are in that tenant's log): the monitor cannot tell. Alert.
+        return "", f"No sign-in by {who} was seen before the change", True
     if not seen["history"]:
-        return "", "", False
+        # Too little history to tell a new network from a known one. No email: during the
+        # learning period every change would alert. Another alert in MFA_PRIOR_DAYS still alerts.
+        return (f"No email: the monitor has seen the sign-in networks of {who} for less than "
+                f"{signin_networks.LEARN_DAYS} days ({_history_age(row, now)}), and "
+                f"{'neither account' if admin else 'the user'} had no other alert in the "
+                f"{MFA_PRIOR_DAYS} days before"), "", False
     if not seen["ips"]:
         return "", f"No sign-in by {who} was seen in the hour before the change", True
     if seen["new"]:
@@ -888,6 +904,14 @@ def _mfa_networks(finding: dict, geo_table, now: datetime) -> tuple:
     return (f"No email: changed after a sign-in by {who} from {', '.join(seen['ips'])} (a network used "
             f"before), and {'neither account' if admin else 'the user'} had no other alert in the "
             f"{MFA_PRIOR_DAYS} days before"), "", True
+
+
+def _history_age(row: dict, now: datetime) -> str:
+    try:
+        days = (now - signin_networks._time(row["since"])).days
+    except (KeyError, TypeError, ValueError):
+        return "no sign-in seen yet"
+    return f"{days} day{'s' if days != 1 else ''} so far"
 
 
 RULE_SIGNIN_HOURS = 24
@@ -1330,15 +1354,26 @@ def update_check(timer: func.TimerRequest) -> None:
 
 @app.timer_trigger(schedule="0 1-59/5 * * * *", arg_name="timer", run_on_startup=False)
 def background_jobs(timer: func.TimerRequest) -> None:
-    """Continue the onboarding scan, if one runs. Each run stops after onboarding.BUDGET_SECONDS."""
+    """Continue the onboarding scan and the sign-in network backfill, if they run.
+
+    Each run stops after onboarding.BUDGET_SECONDS (both jobs together).
+    """
     if not (config.has_credential() and config.ADMIN_EMAIL):
         return
     events_table, ip_cache_table = _get_table_clients()
     state = onboarding.load(events_table)
-    if not state or state.get("step") == "done":
+    scan = bool(state) and state.get("step") != "done"
+    backfill = events_table is not None and network_backfill.pending(events_table)
+    if not (scan or backfill):
         return
     admin_store.refresh()
-    onboarding.run(events_table, ip_cache_table, _DETECTORS)
+    started = time.monotonic()
+    if scan:
+        onboarding.run(events_table, ip_cache_table, _DETECTORS)
+    left = onboarding.BUDGET_SECONDS - (time.monotonic() - started)
+    if backfill and left > 10:
+        network_backfill.run(events_table, geo_monitor.table_client(), datetime.now(timezone.utc),
+                             time.monotonic() + left)
 
 
 # -----------------------------------------------------------------------------
@@ -1595,6 +1630,7 @@ def _runtime_state(events_table, now: datetime, ip_cache_table=None) -> dict:
         "mail_access": mail_access.summary(events_table, now),
         "ip_lookups": proxycheck_quota.status(ip_cache_table, now),
         "update": updates.status(events_table),
+        "network_backfill": network_backfill.summary(events_table),
         "credential": "client secret" if config.CLIENT_SECRET else (
             "managed identity" if config.MANAGED_IDENTITY_CLIENT_ID else "none"),
     }

@@ -318,7 +318,7 @@ class TestMfaChanges:
         event = _aad("Update user.", actor="victim@contoso.com", target="victim@contoso.com",
                      props=[("StrongAuthenticationMethod", _methods(6), _methods(6, 7))])
         f = _one(cd.detect_mfa_changes([event]), "mfa_change", "medium")
-        assert f["user"] == "victim@contoso.com" and "1 to 2" in f["description"]
+        assert f["user"] == "victim@contoso.com" and "Added: code from an authenticator app" in f["description"]
 
     def test_first_registration_ignored(self):
         event = _aad("Update user.", props=[("StrongAuthenticationMethod", "", _methods(6))])
@@ -329,7 +329,7 @@ class TestMfaChanges:
         new = json.dumps([{"DeviceName": "iPhone", "DeviceToken": "a"}, {"DeviceName": "Pixel", "DeviceToken": "b"}])
         event = _aad("Update user.", props=[("StrongAuthenticationPhoneAppDetail", old, new)])
         f = _one(cd.detect_mfa_changes([event]), "mfa_change", "medium")
-        assert "Authenticator app devices" in f["description"]
+        assert "Authenticator app device added: Pixel." in f["description"]
 
     def test_method_removed_ignored(self):
         event = _aad("Update user.", props=[("StrongAuthenticationMethod", _methods(6, 7), _methods(6))])

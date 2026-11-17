@@ -21,6 +21,7 @@ const STATUS_PILLS = {
   onboarding: ["neutral", "Onboarding scan"],
   microsoft: ["neutral", "Microsoft service"],
   "known sign-in": ["neutral", "Known sign-in"],
+  "list only": ["info", "Listed, no email"],
 };
 // The triage state that an admin sets. It changes only the view: later alerts still go out.
 const TRIAGE = { "": ["neutral", "Open"], investigating: ["warn", "Investigating"], benign: ["ok", "Benign"], resolved: ["ok", "Resolved"] };
@@ -583,8 +584,23 @@ function monitorCard() {
       ["Sign-ins in the digest queue", String(queues.digest ?? "unknown")],
       ["Mail access records, 7 days", ...mailAccessValue(health.mail_access)],
       ["IP lookups (proxycheck.io)", ...lookupValue(health.ip_lookups)],
+      ["Past sign-ins loaded", ...backfillValue(health.network_backfill)],
       ["Version", ...versionValue(health.update)],
     ]));
+}
+
+// The one-time load of 30 days of sign-ins into the network history (MFA and inbox rule checks).
+function backfillValue(b) {
+  const note = (text) => h("span", { class: "sub", text });
+  if (!b) return ["not started", note("Starts within 5 minutes. Until it is done, MFA changes send email only after another alert.")];
+  if (b.finished_at && !b.skipped) {
+    return [`${(b.records || 0).toLocaleString()} sign-in records`, note(b.limit_exceeded
+      ? "Microsoft's search limit was reached: the history is not complete, and builds from new sign-ins (14 days)."
+      : `From ${utc(b.from)}. Done ${ago(b.finished_at)}.`)];
+  }
+  if (b.finished_at) return ["stopped", note(`${b.skipped}. The network history builds from new sign-ins (14 days).`)];
+  const status = b.status ? `audit search ${b.status}` : "starting";
+  return ["running", note(`${status}${b.records ? `, ${b.records.toLocaleString()} records read` : ""}${b.error ? ` (last error: ${b.error})` : ""}. A search takes 4 to 40 minutes, sometimes hours.`)];
 }
 
 // "1.0.0" and, when GitHub has a newer release, "Update available" with the release notes.
@@ -1552,7 +1568,7 @@ let alertsLoading = false;
 let alertsSeq = 0;
 
 // The label of a row's action text: what the monitor did, or why it sent no email.
-const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No email", "known sign-in": "No email" };
+const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No email", "known sign-in": "No email", "list only": "No email" };
 
 // ``selection`` (optional): { ids: Set of alert IDs, changed() }. Adds a checkbox to each row.
 function findingsTable(rows, withUser, onTriaged, selection) {

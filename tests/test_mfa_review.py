@@ -152,14 +152,22 @@ class TestReview:
         send, rows = self._run([(HOME, 3)], prior="inbox_rule", prior_triage="benign")
         assert not send.called and rows[0]["status"] == "known sign-in"
 
-    @pytest.mark.parametrize("signins,history,expect", [
-        ([], 30, "No sign-in by the user"),          # no sign-in seen: the monitor cannot tell
-        ([(HOME, 3)], 5, ""),                        # history shorter than 14 days
-    ], ids=["no-signin", "short-history"])
-    def test_cannot_tell_alerts(self, signins, history, expect):
-        send, _ = self._run(signins, history_days=history)
+    def test_no_signin_seen_alerts(self):
+        send, _ = self._run([], history_days=30)
         finding, context = send.call_args.args[:2]
-        assert finding["severity"] == "medium" and context.startswith(expect) and bool(context) == bool(expect)
+        assert finding["severity"] == "medium" and context.startswith("No sign-in by the user")
+
+    @pytest.mark.parametrize("signins", [[(HOME, 3)], [(NEW, 3)], []], ids=["known", "new", "none-in-window"])
+    def test_learning_period_sends_no_email(self, signins):
+        # History shorter than 14 days: a network cannot be told new from known.
+        send, rows = self._run(signins, history_days=5)
+        assert not send.called and rows[0]["status"] == "known sign-in"
+        assert "less than 14 days (5 days so far)" in rows[0]["action"]
+
+    def test_learning_period_still_alerts_after_another_alert(self):
+        send, _ = self._run([(HOME, 3)], history_days=5, prior="inbox_rule")
+        finding, context = send.call_args.args[:2]
+        assert finding["severity"] == "high" and "Inbox rule" in context
 
     def test_admin_from_known_network_sends_no_email(self):
         send, rows = self._run([(HOME, 3)], actor_upn=ADMIN)
@@ -489,3 +497,130 @@ class TestReviewRoundTwo:
             fa._run_compromise_check(FakeTable(), None, set(), [mfa_record(change)])
         finding, context = send.call_args.args[:2]
         assert finding["severity"] == "high" and "did not use before" in context and "VPN" in context
+
+
+class TestMfaChangeText:
+    """The alert names the methods before and after, the default, and changed contact details."""
+
+    def test_names_old_and_new_methods_and_contact_details(self):
+        import compromise_detector as cd
+        old = json.dumps([{"MethodType": 6, "Default": True}, {"MethodType": 7, "Default": False}])
+        new = json.dumps([{"MethodType": 7, "Default": False}, {"MethodType": 5, "Default": True},
+                          {"MethodType": 2, "Default": False}])
+        old_d = json.dumps([{"PhoneNumber": None, "Email": "help@fabrikam.com", "VoiceOnlyPhoneNumber": None}])
+        new_d = json.dumps([{"PhoneNumber": "+1 5550111", "Email": "help@fabrikam.com",
+                             "VoiceOnlyPhoneNumber": "+1 5550100"}])
+        event = {**mfa_record(datetime.now(timezone.utc)), "ModifiedProperties": [
+            {"Name": "StrongAuthenticationMethod", "OldValue": old, "NewValue": new},
+            {"Name": "StrongAuthenticationUserDetails", "OldValue": old_d, "NewValue": new_d}]}
+        text = cd.detect_mfa_changes([event])[0]["description"]
+        assert "Added: text message code to mobile phone, voice call to office phone." in text
+        assert "Removed: Authenticator app notification." in text
+        assert "Default method changed: Authenticator app notification to text message code to mobile phone." in text
+        assert "Methods before: Authenticator app notification (default), code from" in text
+        assert "mobile phone none to +1 5550111; voice-only phone none to +1 5550100." in text
+        assert "help@fabrikam.com" not in text           # unchanged details are not listed
+
+    def test_unknown_method_type_and_count_fallback(self):
+        import compromise_detector as cd
+        event = {**mfa_record(datetime.now(timezone.utc)), "ModifiedProperties": [
+            {"Name": "StrongAuthenticationMethod", "OldValue": json.dumps([{"MethodType": 6}]),
+             "NewValue": json.dumps([{"MethodType": 6}, {"MethodType": 12}])}]}
+        assert "Added: method type 12." in cd.detect_mfa_changes([event])[0]["description"]
+        event["ModifiedProperties"][0].update(OldValue='[{"MethodType":6}', NewValue='[{"MethodType":6},{"MethodType":7}')
+        assert "(MFA methods: 1 to 2)." in cd.detect_mfa_changes([event])[0]["description"]
+
+
+@pytest.mark.usefixtures("settled")
+class TestSameCountChanges:
+    """A change that keeps the number of methods: a finding, decided by the same context check."""
+
+    def _event(self, old, new, prop="StrongAuthenticationMethod", when=None):
+        event = mfa_record(when or datetime.now(timezone.utc))
+        event["ModifiedProperties"] = [{"Name": prop, "OldValue": json.dumps(old), "NewValue": json.dumps(new)}]
+        return event
+
+    @pytest.mark.parametrize("old,new,prop,expect", [
+        ([{"MethodType": 6, "Default": True}, {"MethodType": 7}], [{"MethodType": 5, "Default": True}, {"MethodType": 7}],
+         "StrongAuthenticationMethod", "Added: text message code to mobile phone."),
+        ([{"MethodType": 6, "Default": True}, {"MethodType": 5}], [{"MethodType": 6}, {"MethodType": 5, "Default": True}],
+         "StrongAuthenticationMethod", "Default method changed: Authenticator app notification to text message code"),
+        ([{"DeviceName": "Pixel"}], [{"DeviceName": "Galaxy"}],
+         "StrongAuthenticationPhoneAppDetail", "Authenticator app device added: Galaxy."),
+    ], ids=["method-replaced", "default-changed", "device-replaced"])
+    def test_creates_a_finding(self, old, new, prop, expect):
+        import compromise_detector as cd
+        found = cd.detect_mfa_changes([self._event(old, new, prop)])
+        assert len(found) == 1 and expect in found[0]["description"]
+
+    @pytest.mark.parametrize("old,new", [
+        ([{"MethodType": 6, "Default": True}, {"MethodType": 7}], [{"MethodType": 7}, {"MethodType": 6, "Default": True}]),
+        ([{"MethodType": 6, "Default": True}, {"MethodType": 7}], [{"MethodType": 6, "Default": True}]),
+        ([], [{"MethodType": 6, "Default": True}]),
+    ], ids=["reordered", "one-removed", "first-registration"])
+    def test_no_finding(self, old, new):
+        import compromise_detector as cd
+        assert cd.detect_mfa_changes([self._event(old, new)]) == []
+
+    def _run(self, signins, prior=None):
+        now = datetime.now(timezone.utc)
+        change = now - timedelta(minutes=60)
+        geo, jt = FakeTable(), FakeTable()
+        sn.record(geo, [signin(HOME, now - timedelta(days=30))], now - timedelta(days=30))
+        sn.record(geo, [signin(ip, change - timedelta(minutes=m)) for ip, m in signins], now)
+        if prior:
+            journal.record(jt, {"type": prior, "severity": "medium", "user": USER, "description": "d",
+                                "event": {"CreationTime": _t(change - timedelta(minutes=5))}}, "k-prior", "emailed", now=now)
+        event = self._event([{"MethodType": 6, "Default": True}, {"MethodType": 7}],
+                            [{"MethodType": 5, "Default": True}, {"MethodType": 7}], when=change)
+        with patch("geo_monitor.table_client", return_value=geo), \
+                patch("journal.table_client", return_value=jt), \
+                patch("function_app.check_ips_batch", return_value={}), \
+                patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_compromise_check(FakeTable(), None, set(), [event])
+        return send, [r for r in journal.for_user(jt, USER, now - timedelta(days=1)) if r["type"] == "mfa_change"]
+
+    def test_after_a_suspicious_sign_in_alert_is_high(self):
+        send, _ = self._run([(NEW, 3)], prior="suspicious_signin")
+        finding, context = send.call_args.args[:2]
+        assert finding["severity"] == "high" and "Suspicious sign-in" in context
+
+    def test_from_a_known_network_sends_no_email(self):
+        send, rows = self._run([(HOME_NEW_ADDR, 3)])
+        assert not send.called and rows[0]["status"] == "known sign-in"
+
+
+@pytest.mark.usefixtures("settled")
+class TestMfaReset:
+    """All methods removed: listed with no email, also after another alert."""
+
+    def _reset(self, when, actor_upn=ADMIN):
+        event = mfa_record(when, actor_upn)
+        event["ModifiedProperties"] = [{"Name": "StrongAuthenticationMethod",
+                                        "OldValue": json.dumps([{"MethodType": 6, "Default": True}, {"MethodType": 7}]),
+                                        "NewValue": "[]"}]
+        return event
+
+    def test_finding_text(self):
+        import compromise_detector as cd
+        found = cd.detect_mfa_changes([self._reset(datetime.now(timezone.utc))])
+        assert len(found) == 1 and found[0]["list_only"] and found[0]["user"] == USER
+        text = found[0]["description"]
+        assert "All MFA methods were removed from victim@contoso.com" in text
+        assert "before: Authenticator app notification (default), code from" in text
+        assert "Changed by admin@contoso.com." in text
+
+    def test_listed_without_email_or_response(self):
+        now = datetime.now(timezone.utc)
+        jt = FakeTable()
+        journal.record(jt, {"type": "suspicious_signin", "severity": "high", "user": USER, "description": "d",
+                            "event": {"CreationTime": _t(now - timedelta(hours=1))}}, "k-prior", "emailed", now=now)
+        with patch("geo_monitor.table_client", return_value=FakeTable()), \
+                patch("journal.table_client", return_value=jt), \
+                patch("function_app.check_ips_batch", return_value={}), \
+                patch("responder.respond_to_finding") as respond, \
+                patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_compromise_check(FakeTable(), None, set(), [self._reset(now - timedelta(minutes=30))])
+        assert not send.called and not respond.called
+        rows = [r for r in journal.for_user(jt, USER, now - timedelta(days=1)) if r["type"] == "mfa_change"]
+        assert rows[0]["status"] == "list only" and rows[0]["triage"] == ""

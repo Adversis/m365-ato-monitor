@@ -1250,6 +1250,135 @@ def _phone_numbers(value) -> set:
             if d.get(f) and str(d.get(f)).strip()}
 
 
+# StrongAuthenticationMethod "MethodType" numbers. Source: Microsoft Defender Experts, "Hunting for
+# MFA manipulations in Entra ID tenants using KQL" (Table 2), 2024.
+_METHOD_NAMES = {
+    0: "voice call to mobile phone",
+    1: "text message to mobile phone (two-way)",
+    2: "voice call to office phone",
+    3: "voice call to alternate mobile phone",
+    4: "text message to alternate mobile phone (two-way)",
+    5: "text message code to mobile phone",
+    6: "Authenticator app notification",
+    7: "code from an authenticator app or OATH token",
+}
+_DETAIL_NAMES = (("PhoneNumber", "mobile phone"), ("AlternativePhoneNumber", "alternate phone"),
+                 ("VoiceOnlyPhoneNumber", "voice-only phone"), ("Email", "email"))
+
+
+def _json_list(value) -> list:
+    """A StrongAuthentication* value as a list of dicts ([] if it does not parse)."""
+    try:
+        data = json.loads(str(value or "").strip() or "[]")
+        if isinstance(data, str):
+            data = json.loads(data)
+    except (ValueError, TypeError):
+        return []
+    items = data if isinstance(data, list) else [data]
+    return [d for d in items if isinstance(d, dict)]
+
+
+def _method_name(item: dict) -> str:
+    try:
+        return _METHOD_NAMES.get(int(item.get("MethodType")), f"method type {item.get('MethodType')}")
+    except (TypeError, ValueError):
+        return "unknown method"
+
+
+def _method_change_text(props: dict) -> str:
+    """'Added: X. Default: A to B. Before: ... After: ...' for StrongAuthenticationMethod ('' if none)."""
+    if "StrongAuthenticationMethod" not in props:
+        return ""
+    old, new = (_json_list(v) for v in props["StrongAuthenticationMethod"])
+    old_names, new_names = [_method_name(d) for d in old], [_method_name(d) for d in new]
+    parts = []
+    added = [n for n in new_names if n not in old_names]
+    removed = [n for n in old_names if n not in new_names]
+    if added:
+        parts.append(f"Added: {', '.join(added)}.")
+    if removed:
+        parts.append(f"Removed: {', '.join(removed)}.")
+    old_default = next((_method_name(d) for d in old if d.get("Default") is True), "")
+    new_default = next((_method_name(d) for d in new if d.get("Default") is True), "")
+    if new_default and old_default != new_default:
+        parts.append(f"Default method changed: {old_default or 'none'} to {new_default}.")
+    if old or new:
+        def listed(items):
+            return ", ".join(_method_name(d) + (" (default)" if d.get("Default") is True else "")
+                             for d in items) or "none"
+        parts.append(f"Methods before: {listed(old)}. After: {listed(new)}.")
+    return " ".join(parts)
+
+
+def _detail_change_text(props: dict) -> str:
+    """Changed phone numbers and email of StrongAuthenticationUserDetails ('' if none)."""
+    if "StrongAuthenticationUserDetails" not in props:
+        return ""
+    old, new = (({k: v for d in _json_list(v) for k, v in d.items()}) for v in props["StrongAuthenticationUserDetails"])
+    changes = []
+    for field, label in _DETAIL_NAMES:
+        a, b = str(old.get(field) or "").strip(), str(new.get(field) or "").strip()
+        if a != b:
+            changes.append(f"{label} {a or 'none'} to {b or 'none'}")
+    return f"Contact details changed: {'; '.join(changes)}." if changes else ""
+
+
+def _device_change_text(props: dict) -> str:
+    """Authenticator app devices added (StrongAuthenticationPhoneAppDetail; '' if none)."""
+    if "StrongAuthenticationPhoneAppDetail" not in props:
+        return ""
+    old, new = (_json_list(v) for v in props["StrongAuthenticationPhoneAppDetail"])
+    before = {str(d.get("DeviceName") or "").strip() for d in old}
+    added = sorted({str(d.get("DeviceName") or "").strip() for d in new} - before - {""})
+    return f"Authenticator app device added: {', '.join(added)}." if added else ""
+
+
+def _swap_changes(props: dict) -> list:
+    """Changes that keep the number of methods: a method replaced, the default changed, a device replaced.
+
+    Only for an account that had MFA and still has a method (an admin's reset to none is not one).
+    """
+    out = []
+    if "StrongAuthenticationMethod" in props:
+        old, new = (_json_list(v) for v in props["StrongAuthenticationMethod"])
+        if old and new:
+            if {_method_name(d) for d in new} - {_method_name(d) for d in old}:
+                out.append("method replaced")
+            old_default = next((_method_name(d) for d in old if d.get("Default") is True), "")
+            new_default = next((_method_name(d) for d in new if d.get("Default") is True), "")
+            if old_default and new_default and old_default != new_default:
+                out.append("default method changed")
+    if "StrongAuthenticationPhoneAppDetail" in props:
+        old, new = (_json_list(v) for v in props["StrongAuthenticationPhoneAppDetail"])
+        before = {str(d.get("DeviceName") or "").strip() for d in old} - {""}
+        if before and {str(d.get("DeviceName") or "").strip() for d in new} - before - {""}:
+            out.append("Authenticator app device replaced")
+    return out
+
+
+def _mfa_reset_finding(event: dict, props: dict) -> Optional[dict]:
+    """All MFA methods removed ("Require re-register MFA"): the next sign-in registers a new method.
+
+    An admin does it for a lost phone. A person with an admin's access can do it, then register
+    their own method for the user (a first registration, which is not an alert). Listed in the
+    alert list with no email (``list_only``): a later alert for the user shows it as context.
+    """
+    if "StrongAuthenticationMethod" not in props:
+        return None
+    old, new = (_json_list(v) for v in props["StrongAuthenticationMethod"])
+    if not old or new:
+        return None
+    target = _target_user(event)
+    actor = _actor_name(event)
+    by = f"Changed by {actor}." if "@" in actor else f"Record written by {actor}."
+    names = ", ".join(_method_name(d) + (" (default)" if d.get("Default") is True else "") for d in old)
+    finding = _finding("mfa_change", "medium", target,
+                       f"All MFA methods were removed from {target} (before: {names}). The next sign-in "
+                       f"registers a new method: whoever signs in first chooses it. {by}", event, target=target)
+    finding["list_only"] = True
+    return finding
+
+
 def _mfa_finding(event: dict) -> Optional[dict]:
     operation = _operation(event)
     actor = _user(event)
@@ -1279,16 +1408,21 @@ def _mfa_finding(event: dict) -> Optional[dict]:
         # A first phone number (none before) is a normal registration.
         if old_phones and added:
             changes.append(f"phone number added or changed: {', '.join(added)}")
+    changes += _swap_changes(props)
     if not changes:
-        return None
+        return _mfa_reset_finding(event, props)
     target = _target_user(event)
     actor = _actor_name(event)
     # The MFA service writes the record when the user registers a method in My Sign-ins.
     by = (f"Changed by {actor}." if "@" in actor else
           f"Registered by the user, or by someone with the user's sign-in (record written by {actor}).")
+    detail = " ".join(t for t in (_method_change_text(props), _detail_change_text(props),
+                                  _device_change_text(props)) if t)
+    # The method names, when the record has them; else the counts.
+    summary = f" {detail}" if detail else f" ({'; '.join(changes)})."
     return _finding("mfa_change", "medium", target,
-                    f"An MFA method was added or changed for {target}, which already had MFA "
-                    f"({'; '.join(changes)}). {by}", event, target=target)
+                    f"An MFA method was added or changed for {target}, which already had MFA.{summary} {by}",
+                    event, target=target)
 
 
 def detect_mfa_changes(events: list[dict]) -> list[dict]:

@@ -348,7 +348,8 @@ def _user_button(event: dict, user: str = "") -> str:
 
 _STATUS_TEXT = {"emailed": "alert sent", "email failed": "email failed", "alert off": "alert type off",
                 "muted": "muted", "onboarding": "onboarding scan", "install": "made by install.ps1",
-                "microsoft": "Microsoft service", "known sign-in": "known sign-in, no email"}
+                "microsoft": "Microsoft service", "known sign-in": "known sign-in, no email",
+                "list only": "listed, no email"}
 
 
 def _repeats_text(row: dict) -> str:

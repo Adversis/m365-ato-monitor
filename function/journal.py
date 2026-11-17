@@ -43,7 +43,8 @@ _MAX_TEXT = 1000
 _MAX_EVENT = 30_000   # a Table Storage string holds at most 32K characters
 _RECORD_PREFIX = "r-"
 
-STATUSES = ("emailed", "email failed", "alert off", "muted", "onboarding", "install", "microsoft", "known sign-in")
+STATUSES = ("emailed", "email failed", "alert off", "muted", "onboarding", "install", "microsoft", "known sign-in",
+            "list only")
 # Rows that no view shows: permissions that install.ps1 granted to the monitor app (older
 # versions journaled them; new ones only log them).
 HIDDEN = ("install",)
