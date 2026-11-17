@@ -356,6 +356,10 @@ ALERTS_OFF = set(_csv_env("ALERTS_OFF", ""))
 MAIL_FLOW_RULE_ANY = _bool_env("MAIL_FLOW_RULE_ANY", "false")
 # Weekly health report (Mondays): runs, sign-ins checked, findings, posture.
 WEEKLY_REPORT = _bool_env("WEEKLY_REPORT", "true")
+# Check once a day for a newer release (GitHub API, no sign-in, no tenant data). Notify only.
+UPDATE_CHECK = _bool_env("UPDATE_CHECK", "true")
+# The GitHub repository ("owner/name") whose releases the check reads. A fork can set its own.
+UPDATE_REPO = os.environ.get("UPDATE_REPO", "Adversis/m365-ato-monitor").strip()
 
 
 def normalize_asn(value) -> str:

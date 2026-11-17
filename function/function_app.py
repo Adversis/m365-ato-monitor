@@ -69,6 +69,7 @@ import private_relay
 import proxycheck_quota
 import session_monitor
 import signin_networks
+import updates
 from service_actors import is_microsoft_service
 
 app = func.FunctionApp()
@@ -1190,7 +1191,21 @@ def _weekly_health(events_table, now: datetime) -> dict:
         if events_table else []
     return {"last_content": max(seen) if seen else None, "queues": state["queues"],
             "onboarding": onboarding.summary(onboarding.load(events_table)),
-            "mail_access": state["mail_access"], "ip_lookups": state["ip_lookups"]}
+            "mail_access": state["mail_access"], "ip_lookups": state["ip_lookups"], "update": state["update"]}
+
+
+# -----------------------------------------------------------------------------
+# Update check (06:37 UTC daily): is a newer release available? Notify only.
+# -----------------------------------------------------------------------------
+
+@app.timer_trigger(schedule="0 37 6 * * *", arg_name="timer", run_on_startup=False)
+def update_check(timer: func.TimerRequest) -> None:
+    """Read the latest release from GitHub (UPDATE_CHECK). Nothing is installed."""
+    if not config.storage_configured():
+        return
+    admin_store.refresh()
+    events_table, _ = _get_table_clients()
+    updates.check(events_table)
 
 
 # -----------------------------------------------------------------------------
@@ -1458,6 +1473,7 @@ def _runtime_state(events_table, now: datetime, ip_cache_table=None) -> dict:
         "country_baseline": geo_monitor.status(geo_monitor.table_client(), now) if events_table else None,
         "mail_access": mail_access.summary(events_table, now),
         "ip_lookups": proxycheck_quota.status(ip_cache_table, now),
+        "update": updates.status(events_table),
         "credential": "client secret" if config.CLIENT_SECRET else (
             "managed identity" if config.MANAGED_IDENTITY_CLIENT_ID else "none"),
     }

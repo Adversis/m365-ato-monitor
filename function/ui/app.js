@@ -583,7 +583,22 @@ function monitorCard() {
       ["Sign-ins in the digest queue", String(queues.digest ?? "unknown")],
       ["Mail access records, 7 days", ...mailAccessValue(health.mail_access)],
       ["IP lookups (proxycheck.io)", ...lookupValue(health.ip_lookups)],
+      ["Version", ...versionValue(health.update)],
     ]));
+}
+
+// "1.0.0" and, when GitHub has a newer release, "Update available" with the release notes.
+function versionValue(u) {
+  if (!u || !u.version) return ["unknown"];
+  if (u.newer) {
+    return [u.version, " ", pill("warn", `Update available: ${u.latest}`),
+      h("span", { class: "sub" }, u.url ? h("a", { href: u.url, target: "_blank", rel: "noopener noreferrer", text: "Release notes" }) : "Release notes on GitHub",
+        ". To update, run ./install.ps1 -Update.")];
+  }
+  if (!u.enabled) return [u.version, h("span", { class: "sub", text: "Update check off (Settings > Advanced)." })];
+  if (u.error) return [u.version, h("span", { class: "sub", text: `Update check: ${u.error}.` })];
+  if (u.checked_at) return [u.version, h("span", { class: "sub", text: `Up to date. Checked ${ago(u.checked_at)}.` })];
+  return [u.version, h("span", { class: "sub", text: "Not checked yet (once a day)." })];
 }
 
 // "850 of 1,000 used today (Free plan)", or "" if the count is not known.

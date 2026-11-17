@@ -777,6 +777,8 @@ The script does not change:
 
 ## Update the monitor
 
+Once a day, the monitor asks GitHub for the latest release. When a newer version exists, Overview > Monitor > **Version** shows "Update available" with a link to the release notes, and the weekly report says so. The monitor never installs code itself. The check sends no data about your tenant. Turn it off in Settings > Advanced > **Check for updates**. A fork can set the app setting `UPDATE_REPO` to its own `owner/name`.
+
 Get the new code, then deploy it:
 
 ```powershell

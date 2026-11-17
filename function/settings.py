@@ -253,6 +253,10 @@ SETTINGS = (
             "One per line. An inbox rule that looks for one of these words and marks the mail as "
             "read, moves it, or deletes it is a medium alert.", "word_list"),
 
+    Setting("UPDATE_CHECK", "advanced", "Check for updates",
+            "Once a day, ask GitHub for the latest release (no sign-in, no data about your tenant). "
+            "Overview and the weekly report then say when an update is available. The monitor never "
+            "installs code itself: run ./install.ps1 -Update.", "bool"),
     Setting("IP_CACHE_DAYS", "advanced", "Keep clean IP lookups (days)",
             "How long the monitor keeps a proxycheck.io answer for an IP that is not flagged (office, home, "
             "mobile). Each new lookup uses the daily quota. A flagged IP (VPN, proxy, hosting, Tor) is looked "

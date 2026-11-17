@@ -1034,12 +1034,20 @@ def send_weekly_report(stats, findings: list, health: dict, now: datetime = None
         checked = "In the last 7 days, the monitor ran. The counts are not available."
     if last is not None:
         checked += f" The last audit content arrived {_e(_fmt_time(last.isoformat()))}."
+    update = health.get("update") or {}
+    if update.get("version"):
+        checked += f" Version {_e(update['version'])}."
     parts = [_p(checked)]
     if problems:
         parts.append(_notice("high" if any("not" in p for p in problems) else "medium",
                              "<strong>Check these:</strong>" + _steps([_e(p) for p in problems])))
     else:
         parts.append(_notice("ok", "<strong>The monitor works.</strong> No gaps, errors, or queued emails."))
+    if update.get("newer"):
+        notes = _link(update["url"], "release notes") if update.get("url") else "the release notes on GitHub"
+        parts.append(_notice("info", f"<strong>Update available: version {_e(update['latest'])}</strong> "
+                                     f"(this is {_e(update['version'])}). Read {notes}, then run "
+                                     "<code>./install.ps1 -Update</code>."))
 
     tiles = (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
              f'style="border-collapse:collapse;margin:0 0 16px;"><tr>'

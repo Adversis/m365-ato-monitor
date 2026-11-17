@@ -16,6 +16,8 @@ on:
     # installs the newest versions that function/requirements.txt allows.
     - cron: "23 5 1 * *"
   workflow_dispatch:
+  # The release workflow runs these checks before it publishes a release.
+  workflow_call:
 
 permissions: {}
 

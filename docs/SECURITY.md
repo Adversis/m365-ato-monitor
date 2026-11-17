@@ -98,6 +98,7 @@ The app does not follow a URL that fails the check, and logs an error. Because o
 | Recipient addresses in rules and forwarding | Management API | Every SMTP address in every forward field is checked. A value with no SMTP address causes an alert. |
 | Risk score | proxycheck.io | Integer, clamped to 0–100. 0 if not valid. |
 | proxycheck.io per-IP result | proxycheck.io | Used only if it is an object with a `proxy` field |
+| Latest release (update check) | GitHub API, once a day (`UPDATE_CHECK`) | Only a `MAJOR.MINOR.PATCH` tag is used; drafts and pre-releases are skipped. The release link is shown only if it starts with `https://github.com/<UPDATE_REPO>/`. The answer is shown, never run: the monitor does not download or install code. The request has no sign-in and no tenant data |
 | Values in alert emails | All sources | HTML-escaped. Links: the object ID must be a GUID; the href is escaped. |
 | UPN in the Graph lookup URL | Management API | URL-encoded with no safe characters |
 | `/api/recent` `hours`, `limit` | HTTP | Integers, clamped to 1–168 and 1–500. 400 if not integers. |

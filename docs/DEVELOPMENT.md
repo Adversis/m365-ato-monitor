@@ -49,4 +49,8 @@ CI (`.github/workflows/ci.yml`) runs on each pull request, on each push to `main
 
 A second workflow (`.github/workflows/devcontainer.yml`) builds the dev container and runs `make check` in it. It runs when the container or its inputs change, and on the 1st of each month, so that a pinned download that changes or disappears is found early. Dependabot updates the base image.
 
+## Releases
+
+To release, raise `VERSION` in `function/version.py` (`MAJOR.MINOR.PATCH`) in a commit to `main`. The release workflow (`.github/workflows/release.yml`) runs CI, then tags the commit `v<VERSION>` and publishes a GitHub release with generated notes. A version that already has a release is skipped. Installed monitors check the latest release once a day and show "Update available" in the management UI and the weekly report; a person then runs `./install.ps1 -Update`. If an update needs more than `-Update` (for example a step that the person must do by hand), say so in the release notes.
+
 See [Security: CI](SECURITY.md#ci) for the repository settings to apply. To add a detection, see [AGENTS.md](../AGENTS.md#add-a-detection).
