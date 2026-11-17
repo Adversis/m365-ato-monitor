@@ -726,15 +726,18 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     """Detect compromise indicators and send one alert for each new finding."""
     logging.info("Compromise check triggered")
 
-    if not events:
-        return
-
     findings = []
     for detector in _DETECTORS:
         try:
-            findings.extend(detector(events))
+            findings.extend(detector(events or []))
         except Exception:
             logging.exception(f"Detector {detector.__name__} failed")
+    # Findings whose "no email" decision waits for late sign-in records (_REVIEW_SETTLE).
+    held = _held_reviews(events_table)
+    known = {finding_key(f) for f in findings}
+    findings += [f for f in held if finding_key(f) not in known]
+    if not findings:
+        return
 
     new_findings = [f for f in findings if finding_key(f) not in processed_keys]
     now = datetime.now(timezone.utc)
@@ -748,16 +751,14 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
     for finding in [f for f in new_findings if finding_key(f) not in processed_keys and failed_sign_in_off(f)]:
         _record_not_alert(finding, events_table, processed_keys, now, "alert off", FAILED_SIGN_IN_OFF)
     geo_table = geo_monitor.table_client() if events_table else None
-    mfa_context = {}
-    for finding in [f for f in new_findings if finding_key(f) not in processed_keys and mfa_method_change(f)]:
-        quiet, context = _mfa_review(finding, geo_table, now)
-        if quiet:
-            _record_not_alert(finding, events_table, processed_keys, now, "known sign-in", quiet)
-        else:
-            mfa_context[id(finding)] = context
     new_findings = [f for f in new_findings if finding_key(f) not in processed_keys]
     if not new_findings:
+        _drop_held(events_table, held, processed_keys)
         return
+    # The sign-in networks of an MFA change, before the IP lookups: a new network's IP is looked up too.
+    mfa_networks = {id(f): _mfa_networks(f, geo_table, now) for f in new_findings if mfa_method_change(f)}
+    # Findings that need context last: the other alerts of this batch are in the journal first.
+    new_findings.sort(key=lambda f: 1 if _needs_context(f) else 0)
 
     # A record that a Microsoft service wrote (for example a rule changed in Outlook mobile, through
     # Microsoft's servers) shows the service's IP, not the client's. Its IP says nothing about the
@@ -792,14 +793,22 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
             elif geo_monitor.is_unusual(geo_table, str(finding.get("user", "")), cc, now):
                 ip_context = f"Source IP country {cc} is new for this user ({analysis['org']})"
                 finding["severity"] = "high"
-        ip_context = "; ".join(t for t in (mfa_context.get(id(finding), ""), ip_context) if t)
-        # A rule that only deletes mail, from an IP that is not flagged: an email only with context.
-        if finding.get("needs_context") and finding["severity"] != "high":
-            quiet, context = _rule_review(finding, geo_table, now)
+        # An MFA method change or a rule that only deletes mail: an email only with context.
+        if _needs_context(finding) and finding["severity"] != "high":
+            rule_ip = ip if ip and id(finding) not in service_ip and ip in finding_ips else ""
+            quiet, context, wait = _context_review(finding, geo_table, now, mfa_networks.get(id(finding)),
+                                                   rule_ip, ip_unchecked)
+            # "No email" or "no sign-in seen": a sign-in record can arrive after the record of the
+            # change. Decide on a later run, _REVIEW_SETTLE after the monitor first saw the record.
+            if wait and not _settled(finding, now) and _hold_review(events_table, finding, now):
+                continue
             if quiet:
                 _record_not_alert(finding, events_table, processed_keys, now, "known sign-in", quiet)
                 continue
             ip_context = "; ".join(t for t in (context, ip_context) if t)
+        elif id(finding) in mfa_networks:
+            # A high MFA alert (its sign-in IP is flagged): say where that IP comes from.
+            ip_context = "; ".join(t for t in (mfa_networks[id(finding)][1], ip_context) if t)
 
         if _deliver_finding(finding, ip_context, events_table, processed_keys, geo_table, now,
                             ip_unchecked=ip_unchecked):
@@ -807,9 +816,10 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
         elif finding_key(finding) not in processed_keys:
             failed = True
 
+    _drop_held(events_table, held, processed_keys)
     logging.info(
         f"Compromise check: {len(new_findings)} new findings, {sent_count} alerts sent or queued, "
-        f"{len(events)} events"
+        f"{len(events or [])} events"
     )
     if failed:
         raise RuntimeError("Compromise alerts remain neither delivered nor queued")
@@ -827,74 +837,172 @@ def mfa_method_change(finding: dict) -> bool:
     return finding.get("type") == "mfa_change" and event.get("Operation") == "Update user."
 
 
+def _needs_context(finding: dict) -> bool:
+    """An MFA method change, or an inbox rule that only deletes mail: email only with context."""
+    return mfa_method_change(finding) or bool(finding.get("needs_context"))
+
+
 def _prior_alert(account: str, finding: dict, since: datetime) -> Optional[dict]:
     """The newest alert for ``account`` since ``since`` that sent email and that no admin marked Benign."""
-    rows = [r for r in journal.for_user(journal.table_client(), account, since, exclude_key=finding_key(finding))
-            if r["status"] in ("emailed", "email failed") and r["triage"] != "benign"]
+    rows = journal.for_user(journal.table_client(), account, since, exclude_key=finding_key(finding), limit=1,
+                            keep=lambda r: r["status"] in ("emailed", "email failed") and r["triage"] != "benign")
     return rows[0] if rows else None
+
+
+def _accounts(finding: dict) -> tuple:
+    """(user, signer, admin): the changed account, the account that signed in to make the change,
+    and whether that is an admin who changed another user's MFA."""
+    user = str(finding.get("user") or "").strip()
+    actor = str(finding.get("actor") or "").strip()
+    admin = mfa_method_change(finding) and "@" in actor and actor.lower() != user.lower()
+    return user, (actor if admin else user), admin
+
+
+def _mfa_networks(finding: dict, geo_table, now: datetime) -> tuple:
+    """(quiet reason, alert context, wait) from the sign-ins in the hour before an MFA change.
+
+    The person who signed in is the user (My Sign-ins; the MFA service writes the record) or,
+    for an admin who changed another user's methods, the admin. A sign-in from a network that
+    the person did not use before, no sign-in seen, or too little history: alert. Sets the
+    finding's IP to the new network's IP, so that the IP check also runs on it. ``wait``: the
+    result can change when a late sign-in record arrives (no email, or no sign-in seen).
+    """
+    _, signer, admin = _accounts(finding)
+    who = signer if admin else "the user"
+    seen = signin_networks.near(signin_networks.view(geo_table, signer),
+                                journal.event_time(finding.get("event") or {}, now))
+    if not seen["history"]:
+        return "", "", False
+    if not seen["ips"]:
+        return "", f"No sign-in by {who} was seen in the hour before the change", True
+    if seen["new"]:
+        finding["ip"] = seen["new"][0]
+        return "", (f"Changed after a sign-in by {who} from {seen['new'][0]}, a network that "
+                    f"{'they' if admin else 'the user'} did not use before"), False
+    return (f"No email: changed after a sign-in by {who} from {', '.join(seen['ips'])} (a network used "
+            f"before), and {'neither account' if admin else 'the user'} had no other alert in the "
+            f"{MFA_PRIOR_DAYS} days before"), "", True
 
 
 RULE_SIGNIN_HOURS = 24
 
 
-def _rule_review(finding: dict, geo_table, now: datetime) -> tuple:
-    """(quiet reason, alert context) for an inbox rule that only deletes mail.
+def _context_review(finding: dict, geo_table, now: datetime, mfa_networks: Optional[tuple],
+                    rule_ip: str, ip_unchecked: bool) -> tuple:
+    """(quiet reason, alert context, wait) for a finding that sends email only with context.
 
-    Alert (high) when the user had another alert in the MFA_PRIOR_DAYS before, or signed in from
-    a network that they did not use before in the RULE_SIGNIN_HOURS before the rule. Else no email.
-    Unlike an MFA change, a rule needs no new sign-in, so "no sign-in seen" is not a reason to alert.
+    Alert (high) when the user, or the admin who changed the user's MFA, had another alert in the
+    MFA_PRIOR_DAYS before. An MFA change then follows _mfa_networks. A rule that only deletes mail
+    alerts when its IP was not checked (a failed lookup must not hide it), when its own IP is on a
+    network that the user did not use before, or when the user signed in from a new network in the
+    RULE_SIGNIN_HOURS before. Without network history, a rule sends no email (it needs no new
+    sign-in, so a missing sign-in says nothing). ``wait``: a later run can decide otherwise.
     """
-    user = str(finding.get("user") or "").strip()
+    user, signer, admin = _accounts(finding)
     when = journal.event_time(finding.get("event") or {}, now)
-    prior = _prior_alert(user, finding, when - timedelta(days=MFA_PRIOR_DAYS))
-    if prior:
+    for account in [user] + ([signer] if admin else []):
+        prior = _prior_alert(account, finding, when - timedelta(days=MFA_PRIOR_DAYS))
+        if prior:
+            finding["severity"] = "high"
+            name = "The user" if account == user else account
+            return "", (f"{name} had another alert in the {MFA_PRIOR_DAYS} days before: "
+                        f"{short_title(prior['type'])} ({prior['at']})"), False
+    if mfa_method_change(finding):
+        return mfa_networks or ("", "", False)
+    if ip_unchecked:
+        return "", "The rule's IP was not checked (the IP lookup failed)", False
+    before = timedelta(hours=RULE_SIGNIN_HOURS)
+    row = signin_networks.view(geo_table, user)
+    if rule_ip and signin_networks.known(row, rule_ip, when, before) is False:
         finding["severity"] = "high"
-        return "", (f"The user had another alert in the {MFA_PRIOR_DAYS} days before: "
-                    f"{short_title(prior['type'])} ({prior['at']})")
-    seen = signin_networks.near(geo_table, user, when, before=timedelta(hours=RULE_SIGNIN_HOURS))
+        return "", f"The rule was made from {rule_ip}, a network that the user did not use before", False
+    seen = signin_networks.near(row, when, before=before)
     if seen["history"] and seen["new"]:
         finding["severity"] = "high"
         return "", (f"The user signed in from {seen['new'][0]}, a network not used before, in the "
-                    f"{RULE_SIGNIN_HOURS} hours before the rule")
+                    f"{RULE_SIGNIN_HOURS} hours before the rule"), False
     return (f"No email: the rule only deletes mail, the user had no other alert in the {MFA_PRIOR_DAYS} days "
-            f"before and no sign-in from a new network in the {RULE_SIGNIN_HOURS} hours before"), ""
+            f"before and no sign-in from a new network in the {RULE_SIGNIN_HOURS} hours before"), "", True
 
 
-def _mfa_review(finding: dict, geo_table, now: datetime) -> tuple:
-    """(quiet reason, alert context) for an MFA method change on one account.
+# A decision that a late sign-in record can change waits until _REVIEW_SETTLE after the monitor
+# first saw the record (Microsoft can publish the sign-in record later than the record of the
+# change, at any latency).
+_REVIEW_SETTLE = timedelta(minutes=30)
+_HOLD_STALE = timedelta(days=2)   # a held row that no run decided (for example a parse error) is removed
+_HOLD_PARTITION = "heldreview"
 
-    The person who signed in is the user (My Sign-ins; the MFA service writes the record) or,
-    for an admin who changed another user's methods, the admin. Alert when the user or the
-    admin had another alert in the MFA_PRIOR_DAYS before (then high), when that person's
-    sign-in before the change came from a network that they did not use before, or when the
-    monitor cannot tell. A quiet reason means: no email, a journal row only.
+
+def _settled(finding: dict, now: datetime) -> bool:
+    """True when the finding was held at least _REVIEW_SETTLE (or a stored time does not parse)."""
+    since = finding.get("_held_since")
+    if not since:
+        return False
+    try:
+        return now - datetime.fromisoformat(since) >= _REVIEW_SETTLE
+    except ValueError:
+        return True
+
+
+def _hold_review(events_table, finding: dict, now: datetime) -> bool:
+    """Keep a finding for a later run. False if it cannot be kept (then decide now).
+
+    Written once, on the first hold. The row has no processed_at: the weekly clean-up of the
+    events partition must not see it. A row is removed when its finding is decided.
     """
-    user = str(finding.get("user") or "").strip()
-    actor = str(finding.get("actor") or "").strip()
-    admin = "@" in actor and actor.lower() != user.lower()
-    signer = actor if admin else user
-    who = actor if admin else "the user"
-    when = journal.event_time(finding.get("event") or {}, now)
-    since = when - timedelta(days=MFA_PRIOR_DAYS)
-    for account in [user] + ([actor] if admin else []):
-        prior = _prior_alert(account, finding, since)
-        if prior:
-            finding["severity"] = "high"
-            name = "the user" if account == user else account
-            return "", (f"{name[0].upper() + name[1:]} had another alert in the {MFA_PRIOR_DAYS} days before: "
-                        f"{short_title(prior['type'])} ({prior['at']})")
-    seen = signin_networks.near(geo_table, signer, when)
-    if not seen["history"]:
-        return "", ""
-    if not seen["ips"]:
-        return "", f"No sign-in by {who} was seen in the hour before the change"
-    if seen["new"]:
-        finding["ip"] = seen["new"][0]
-        return "", (f"Changed after a sign-in by {who} from {seen['new'][0]}, a network that "
-                    f"{'they' if admin else 'the user'} did not use before")
-    accounts = "neither account" if admin else "the user"
-    return (f"No email: changed after a sign-in by {who} from {', '.join(seen['ips'])} (a network used "
-            f"before), and {accounts} had no other alert in the {MFA_PRIOR_DAYS} days before"), ""
+    if finding.get("_held_since"):
+        return True
+    if events_table is None:
+        return False
+    data = json.dumps({**{k: v for k, v in finding.items() if not k.startswith("_")},
+                       "_held_since": now.isoformat()}, default=str)
+    if len(data) > 30_000:
+        return False
+    try:
+        events_table.upsert_entity({"PartitionKey": _HOLD_PARTITION, "RowKey": finding_key(finding),
+                                    "finding": data, "held_at": now.isoformat()})
+    except Exception as e:
+        logging.warning(f"Review not held: {type(e).__name__}")
+        return False
+    logging.info(f"Review held for late sign-in records: {finding.get('type')} for {finding.get('user')}")
+    return True
+
+
+def _held_reviews(events_table) -> list:
+    if events_table is None:
+        return []
+    out = []
+    try:
+        now = datetime.now(timezone.utc)
+        for row in events_table.query_entities(f"PartitionKey eq '{_HOLD_PARTITION}'"):
+            try:
+                stale = now - datetime.fromisoformat(str(row.get("held_at") or "")) > _HOLD_STALE
+            except ValueError:
+                stale = True
+            if stale:
+                logging.error(f"Held review removed after {_HOLD_STALE.days} days without a decision: {row['RowKey']}")
+                events_table.delete_entity(_HOLD_PARTITION, row["RowKey"])
+                continue
+            try:
+                finding = json.loads(row.get("finding") or "")
+            except ValueError:
+                continue
+            if isinstance(finding, dict) and isinstance(finding.get("event"), dict) and finding.get("type"):
+                out.append(finding)
+    except Exception as e:
+        logging.warning(f"Held reviews not read: {type(e).__name__}")
+    return out
+
+
+def _drop_held(events_table, held: list, processed_keys: set) -> None:
+    """Remove the held findings that this run decided."""
+    for finding in held:
+        key = finding_key(finding)
+        if key in processed_keys and events_table is not None:
+            try:
+                events_table.delete_entity(_HOLD_PARTITION, key)
+            except Exception as e:
+                logging.warning(f"Held review not removed: {type(e).__name__}")
 
 
 def _record_install_grant(finding: dict, events_table, processed_keys: set, now: datetime) -> None:
@@ -1249,10 +1357,15 @@ def weekly_cleanup(timer: func.TimerRequest) -> None:
     findings_deleted = journal.purge(journal.table_client())
     session_cutoff = (datetime.now(timezone.utc) - timedelta(days=session_monitor.RETENTION_DAYS)).isoformat()
     session_deleted = _purge_old_entities(svc, session_monitor.TABLE_NAME, "last_seen", session_cutoff)
+    try:
+        networks_deleted = signin_networks.purge(geo_monitor.table_client(), datetime.now(timezone.utc))
+    except Exception as e:
+        networks_deleted = 0
+        logging.warning(f"Cleanup: sign-in networks not purged: {type(e).__name__}")
 
     logging.info(f"Cleanup complete: deleted {deleted} processed events, {cache_deleted} cached IPs, "
                  f"{admin_deleted} old history, email, and mute rows, {session_deleted} old sessions, "
-                 f"{findings_deleted} old findings")
+                 f"{findings_deleted} old findings, {networks_deleted} sign-in network rows")
 
 
 BATCH_DELETE_SIZE = 100  # Table Storage limit for one transaction

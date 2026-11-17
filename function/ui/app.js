@@ -2034,10 +2034,12 @@ async function bulkTriage(rows, selection, next, button, onDone) {
   if (!ok) return;
   setBusy(button, true);
   let saved = 0;
+  let gone = 0;
   let failed = "";
   try {
-    // The server takes up to 100 alerts in one request.
-    for (let i = 0; i < ids.length; i += 100) {
+    // The server takes up to 100 alerts in one request. It stops at a storage error and says
+    // how many it did not save; those stay selected so that Set triage can try them again.
+    for (let i = 0; i < ids.length && !failed; i += 100) {
       const result = await api("/triage", { method: "POST", body: { ids: ids.slice(i, i + 100), state: next, note: note.value } });
       for (const f of result.findings || []) {
         const row = rows.find((r) => r.id === f.id);
@@ -2045,14 +2047,19 @@ async function bulkTriage(rows, selection, next, button, onDone) {
         selection.ids.delete(f.id);
         saved += 1;
       }
+      gone += result.not_found || 0;
+      for (const id of result.not_found_ids || []) selection.ids.delete(id);   // gone: no retry
+      if (result.not_saved) failed = "a storage error. Try again";
     }
   } catch (err) {
     if (err instanceof SessionError) { handleError(err); return; }
     failed = err.message;
   }
   setBusy(button, false);
-  if (failed) toast(`${saved} of ${ids.length} saved. Not saved: ${failed}`);
-  else toast(`${saved} alert${saved === 1 ? "" : "s"} set to ${TRIAGE[next][1]}.`);
+  const left = selection.ids.size;
+  if (failed) toast(`${saved} of ${ids.length} saved. ${left} not saved (${failed}); they stay selected.`);
+  else toast(`${saved} alert${saved === 1 ? "" : "s"} set to ${TRIAGE[next][1]}.` +
+             (gone ? ` ${gone} no longer exist.` : ""));
   if (!failed) selection.ids.clear();
   onDone();
 }

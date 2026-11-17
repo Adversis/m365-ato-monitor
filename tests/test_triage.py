@@ -84,12 +84,32 @@ class TestBulkTriage:
             gone = "u-" + "0" * 32 + "|0000000000000-000000000000"
             code, body = _triage({"ids": ids + [ids[0], gone], "state": "resolved", "note": "Checked with the user"})
             assert code == 200 and body["not_found"] == 1 and body["not_saved"] == 0
+            assert body["not_found_ids"] == [gone]
             assert sorted(f["id"] for f in body["findings"]) == sorted(ids)
             _, data = _findings(triage="resolved")
             assert data["count"] == 3 and _findings(triage="open")[1]["count"] == 1
         history = [json.loads(r["changes"]) for r in ui_on["table"].partition("history").values()]
         assert len(history) == 1 and len(history[0]) == 3                  # one entry, one line per alert
         assert all(line["new"] == "Resolved: Checked with the user" for line in history[0])
+
+    def test_storage_error_reports_what_was_not_saved(self, ui_on):
+        jt = FakeTable()
+        _seed(jt, 3)
+        with patch("journal.table_client", return_value=jt):
+            ids = [r["id"] for r in _findings()[1]["findings"]]
+            real = journal.set_triage
+            calls = []
+
+            def flaky(*a, **kw):
+                calls.append(1)
+                if len(calls) == 2:
+                    raise OSError("503")
+                return real(*a, **kw)
+            with patch("journal.set_triage", side_effect=flaky):
+                code, body = _triage({"ids": ids, "state": "benign"})
+        assert code == 200 and len(body["findings"]) == 1 and body["not_saved"] == 2
+        history = [json.loads(r["changes"]) for r in ui_on["table"].partition("history").values()]
+        assert len(history[0]) == 1                                         # only the saved one
 
     def test_refused_lists(self, ui_on):
         jt = FakeTable()

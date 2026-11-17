@@ -22,7 +22,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # github.workflow is the caller's name when the release workflow calls this one, so a later
+  # push to main cannot replace the release's CI run (the release would then be skipped).
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   # Cancel an older run of the same pull request. Never cancel a run on main.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

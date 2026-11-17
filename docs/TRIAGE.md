@@ -340,7 +340,7 @@ Subject: `[M365 Alert] HIGH: Inbox rule - <user>` (or MEDIUM). Email title: "Sus
 - The alert lists what the rule does (Actions) and for which mail (Conditions). For a rule that the onboarding scan found, the email has no audit record: open the rule on the user page (Management UI > Users > the user > Inbox rules).
 - Look next: `Get-InboxRule -Mailbox <upn> -IncludeHidden`. Microsoft Purview > Audit: the user's `UserLoggedIn` records in the hours before the rule.
 
-A rule that only deletes mail (no forward, no hidden folder, no payment or security words) sends email only with context: another alert for the user in the 7 days before, a flagged rule IP, or a sign-in from a new network in the 24 hours before. The alert names the context. Without it, the rule is in the alert list as "Known sign-in", with no email.
+A rule that only deletes mail (no forward, no hidden folder, no payment or security words) sends email only with context: another alert for the user in the 7 days before, a rule IP that is flagged, new for the user, or not checked, or a sign-in from a new network in the 24 hours before. The alert names the context. Without it, the rule is in the alert list as "Known sign-in", with no email.
 
 **Common benign causes.** The user moves newsletters to RSS Feeds or deletes mail from one sender. The user forwards to a personal address (a policy problem and a data leak, but not an attack). A rule for an assistant. A migration or archive tool (EWS).
 

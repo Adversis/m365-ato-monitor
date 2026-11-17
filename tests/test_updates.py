@@ -72,6 +72,14 @@ def test_errors_keep_the_last_answer(github, answer, error):
     assert s["error"] == error and s["latest"] == "99.0.0" and s["newer"]
 
 
+def test_off_hides_an_old_answer(github):
+    github.get.return_value = _answer(tag_name="v99.0.0", html_url="https://github.com/owner/repo/r")
+    table = FakeTable()
+    assert updates.check(table)["newer"]
+    with patch.object(config, "UPDATE_CHECK", False):
+        assert not updates.status(table)["newer"]
+
+
 def test_network_error(github):
     github.get.side_effect = OSError("down")
     assert updates.check(FakeTable())["error"].startswith("no answer from GitHub")

@@ -81,5 +81,6 @@ def status(table) -> dict:
     for k in ("latest", "url", "published", "checked_at", "error"):
         out[k] = str(row.get(k) or "")
     latest, current = parse(out["latest"]), parse(VERSION)
-    out["newer"] = bool(latest and current and latest > current)
+    # With the check off, an old answer is not shown as "Update available".
+    out["newer"] = bool(out["enabled"] and latest and current and latest > current)
     return out

@@ -55,7 +55,7 @@ _ROW_ID = re.compile(r"^(u-[0-9a-f]{32})\|(\d{13}-[0-9a-f]{12})$")
 _MAX_NOTE = 300
 # Not alerts: the onboarding scan's history, the permissions that install.ps1 granted,
 # changes made by Microsoft's own services (service_actors.py), and MFA methods that the user
-# registered after a sign-in from a known network (function_app._mfa_review).
+# registered after a sign-in from a known network, and delete-only inbox rules (function_app._context_review).
 NOT_ALERTS = ("onboarding", "install", "microsoft", "known sign-in")
 # For reads that must find every row that is still kept, whatever its event time
 # (the onboarding search finds records up to 180 days old).
@@ -242,8 +242,8 @@ def _triage(entity: dict) -> str:
     return state
 
 
-def for_user(table, upn: str, since: datetime, exclude_key: str = "", limit: int = 50) -> list:
-    """Findings for ``upn`` from ``since``, newest first."""
+def for_user(table, upn: str, since: datetime, exclude_key: str = "", limit: int = 50, keep=None) -> list:
+    """Findings for ``upn`` from ``since``, newest first. ``keep(row)``: count only these rows toward ``limit``."""
     if table is None or not upn:
         return []
     out = []
@@ -252,7 +252,10 @@ def for_user(table, upn: str, since: datetime, exclude_key: str = "", limit: int
         for entity in table.query_entities(query):
             if (exclude_key and entity.get("key") == exclude_key) or entity.get("status") in HIDDEN:
                 continue
-            out.append(_row(entity))
+            row = _row(entity)
+            if keep is not None and not keep(row):
+                continue
+            out.append(row)
             if len(out) >= limit:
                 break
     except Exception as e:

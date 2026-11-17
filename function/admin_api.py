@@ -717,7 +717,7 @@ def triage(req: func.HttpRequest) -> func.HttpResponse:
         return _error(400, f"ids must be a list of 1 to {TRIAGE_MAX_IDS} alert IDs.")
     ids = list(dict.fromkeys(ids))
     table = journal.table_client()
-    changed, lines, missing = [], [], 0
+    changed, lines, missing = [], [], []
     for row_id in ids:
         try:
             before, after = journal.set_triage(table, row_id, state, note, user["name"])
@@ -727,7 +727,7 @@ def triage(req: func.HttpRequest) -> func.HttpResponse:
                 break   # record what was saved, then report the failure
             return _error(503, "The change was not saved. Try again.")
         if after is None:
-            missing += 1
+            missing.append(row_id)
             continue
         changed.append(after)
         new = TRIAGE_LABELS[state] + (f": {after['triage_note']}" if after["triage_note"] else "")
@@ -742,8 +742,8 @@ def triage(req: func.HttpRequest) -> func.HttpResponse:
         return _json({"finding": changed[0]})
     if not changed:
         return _error(404, "No such alerts. Reload the page.")
-    return _json({"findings": changed, "not_found": missing,
-                  "not_saved": len(ids) - len(changed) - missing})
+    return _json({"findings": changed, "not_found": len(missing), "not_found_ids": missing,
+                  "not_saved": len(ids) - len(changed) - len(missing)})
 
 
 def history(req: func.HttpRequest) -> func.HttpResponse:

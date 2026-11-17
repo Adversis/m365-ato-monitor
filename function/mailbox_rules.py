@@ -135,7 +135,7 @@ def assess(rule: dict, mailbox: str, folder: str = "") -> tuple:
     if name_note:
         weak.insert(0, name_note)
     # A rule that only deletes mail (newsletters, notifications) is common and alone no sign of an
-    # attack. The alert for a new one needs context (function_app._rule_review); an existing one has none.
+    # attack. The alert for a new one needs context (function_app._context_review); an existing one has none.
     if strong == ["deletes matching messages"] and not weak:
         return "", []
     return ("high" if strong else "medium" if weak else ""), strong + weak
