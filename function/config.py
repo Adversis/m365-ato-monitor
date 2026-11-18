@@ -358,6 +358,9 @@ MAIL_FLOW_RULE_ANY = _bool_env("MAIL_FLOW_RULE_ANY", "false")
 WEEKLY_REPORT = _bool_env("WEEKLY_REPORT", "true")
 # Check once a day for a newer release (GitHub API, no sign-in, no tenant data). Notify only.
 UPDATE_CHECK = _bool_env("UPDATE_CHECK", "true")
+# Opt-in: each management UI request checks that the admin's account is not blocked and that its
+# sessions were not revoked after the sign-in (ui_access.session_refused). Needs User.Read.All.
+UI_ACCOUNT_CHECK = _bool_env("UI_ACCOUNT_CHECK", "false")
 # The GitHub repository ("owner/name") whose releases the check reads. A fork can set its own.
 UPDATE_REPO = os.environ.get("UPDATE_REPO", "Adversis/m365-ato-monitor").strip()
 

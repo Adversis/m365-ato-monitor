@@ -339,3 +339,52 @@ def test_purge_old_history_and_emails():
     admin_store.record_history(table, "b", [{"name": "Y"}])
     assert admin_store.purge_old(table) == 1
     assert [h["by"] for h in admin_store.history(table)] == ["b"]
+
+
+class TestAccountCheck:
+    """UI_ACCOUNT_CHECK (opt-in): a blocked or revoked admin's App Service session is refused."""
+
+    OID = "00000000-0000-4000-8000-0000000000cc"
+    ISSUED = 1_800_000_000          # the sign-in (iat)
+
+    def _req(self):
+        claims = [{"typ": "preferred_username", "val": "admin@contoso.com"}, {"typ": "roles", "val": "Monitor.Admin"},
+                  {"typ": "http://schemas.microsoft.com/identity/claims/objectidentifier", "val": self.OID},
+                  {"typ": "iat", "val": str(self.ISSUED)}]
+        raw = base64.b64encode(json.dumps({"auth_typ": "aad", "role_typ": "roles", "claims": claims}).encode()).decode()
+        return _req(headers={"X-MS-CLIENT-PRINCIPAL": raw})
+
+    def _guard(self, monkeypatch, on, account):
+        import admin_api
+        import ui_access
+        from datetime import datetime, timezone
+        monkeypatch.setattr(config, "UI_ACCOUNT_CHECK", on)
+        ui_access.clear_cache()
+        if isinstance(account, dict) and isinstance(account.get("valid_from"), int):
+            account = {**account, "valid_from": datetime.fromtimestamp(account["valid_from"], timezone.utc).isoformat()}
+        with patch("ui_access._account", return_value=account) as read:
+            out = admin_api.guard(self._req())
+        return out, read
+
+    @pytest.mark.parametrize("account,refused", [
+        ({"enabled": False, "valid_from": ISSUED - 60}, "the account is blocked"),
+        ({"enabled": True, "valid_from": ISSUED + 60}, "revoked after this sign-in"),
+        ({"enabled": True, "valid_from": ISSUED - 60}, ""),
+        (None, ""),                                   # Graph did not answer: allowed
+    ], ids=["blocked", "revoked-after", "revoked-before", "graph-failed"])
+    def test_on(self, ui_on, monkeypatch, account, refused):
+        out, _ = self._guard(monkeypatch, True, account)
+        if refused:
+            assert out.status_code == 401 and refused in json.loads(out.get_body())["error"]
+        else:
+            assert isinstance(out, dict) and out["upn"] in ("", "admin@contoso.com")
+
+    def test_off_reads_nothing(self, ui_on, monkeypatch):
+        out, read = self._guard(monkeypatch, False, {"enabled": False, "valid_from": ""})
+        assert isinstance(out, dict) and not read.called
+
+    def test_setting_is_off_by_default_and_needs_user_read_all(self):
+        import settings
+        s = next(x for x in settings.SETTINGS if x.name == "UI_ACCOUNT_CHECK")
+        assert s.kind == "bool" and s.needs == {True: ("User.Read.All",)}
+        assert config.UI_ACCOUNT_CHECK is False

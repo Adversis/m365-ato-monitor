@@ -225,6 +225,13 @@ SETTINGS = (
             "Only active, direct role assignments count (not PIM-eligible roles that are not activated, "
             "and not roles assigned through a group).",
             "role_set", choices=DIRECTORY_ROLES, needs={"*": ("RoleManagement.Read.Directory",)}),
+    Setting("UI_ACCOUNT_CHECK", "access", "End the session of a blocked or revoked admin",
+            "Off by default. The sign-in to this page lasts until its cookie expires (8 hours, or the "
+            "time set with ./install.ps1 -UiSessionHours): blocking an admin or revoking the admin's "
+            "sessions does not end it. On: each request reads the admin's account from Microsoft Graph "
+            "(at most once a minute) and refuses it if the account is blocked or its sessions were revoked "
+            "after the sign-in. If Graph does not answer, the request is allowed. Needs User.Read.All "
+            "(the response permissions).", "bool", needs={True: ("User.Read.All",)}),
 
     Setting("ALLOWED_IPS", "allow", "Allowed IPs and ranges",
             "One per line, for example 203.0.113.0/24. Sign-ins from these IPs cause no suspicious "

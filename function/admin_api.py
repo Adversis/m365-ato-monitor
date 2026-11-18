@@ -93,8 +93,9 @@ def principal(req: func.HttpRequest):
     upn = next((c.get("val") for c in claims if c.get("typ") in _UPN_CLAIMS), "")
     oid = next((c.get("val") for c in claims if c.get("typ") in _OID_CLAIMS), "")
     display = next((c.get("val") for c in claims if c.get("typ") == "name"), "")
+    issued = next((c.get("val") for c in claims if c.get("typ") == "iat"), "")
     return {"name": str(name)[:200], "roles": roles, "upn": str(upn or "")[:200], "oid": str(oid or "")[:64],
-            "display": str(display or "")[:200]}
+            "display": str(display or "")[:200], "iat": str(issued or "")[:20]}
 
 
 def describe_access(user: dict) -> str:
@@ -160,6 +161,11 @@ def guard(req: func.HttpRequest, mutating: bool = False):
                            f"or to assign you the {ROLE} role: Entra ID > Enterprise applications > the "
                            "admin UI app > Users and groups.")
     user["access"] = reason
+    ended = ui_access.session_refused(user)
+    if ended:
+        logging.warning(f"Management UI session refused ({ended}): user={user.get('name')}")
+        return _error(401, f"Your management UI session has ended: {ended}. Sign out (open /.auth/logout), "
+                           "then sign in again.")
     if mutating:
         if req.headers.get("X-Monitor-Admin") != "1":
             return _refused(req, user, "missing X-Monitor-Admin header")

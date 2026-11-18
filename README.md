@@ -190,6 +190,8 @@ The monitor can revoke a user's sessions, block sign-in, or turn off an inbox ru
 | Never change these accounts | Break-glass and admin accounts. The alert mailbox is always exempt |
 | Maximum account actions per day | A limit, so that a wrong result cannot lock out many users |
 
+<img src="docs/images/auto-response.png" alt="A high inbox rule alert in the management UI: a rule named '.' forwards mail about invoices to an outside address. The response line says: Block sign-in: done; Revoke sessions: done; Disable inbox rule: done." width="700">
+
 A revoke does not stop every app at once: Outlook desktop and other apps with continuous access evaluation stop within about 15 minutes, web apps and other clients when their access token expires (60 to 90 minutes). See [How fast a revoke or block applies](docs/HOW_TO.md#how-fast-a-revoke-or-block-applies).
 
 The response never changes passwords. It does not act on alerts about admin changes or app consents, and Microsoft Graph refuses changes to admin accounts. It acts only on the account that signed in, or on an account that changed its own mailbox or MFA. A change that one account made to another account gets no action, because either account can be the compromised one. The same actions are also buttons on each user's page in the management UI. Details: [How-To: Respond automatically](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).

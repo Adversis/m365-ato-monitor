@@ -68,6 +68,13 @@
 .PARAMETER UiAdmins
     More users who get the Monitor.Admin role. You get it automatically.
 
+.PARAMETER UiSessionHours
+    How long a management UI sign-in lasts, in hours (1 to 24). Without it, App
+    Service Authentication keeps a sign-in for 8 hours. Blocking an admin or
+    revoking the admin's sessions does not end a management UI sign-in: a shorter
+    time limits that. Later runs (also -Update) keep the value. 0 keeps the
+    current value.
+
 .PARAMETER Update
     Deploy the code of this folder and repair the setup. Keeps all settings.
 
@@ -120,6 +127,7 @@ param(
     [Parameter(ParameterSetName = 'Install')][ValidateSet('ask', 'yes', 'no')][string]$ResponsePermissions = 'ask',
     [Parameter(ParameterSetName = 'Install')][ArgumentCompleter({ param($c, $p, $word) 'mailbox', 'tenant' | Where-Object { $_ -like "$word*" } })][string]$MailSendScope = 'mailbox',
     [Parameter(ParameterSetName = 'Install')][string[]]$UiAdmins = @(),
+    [Parameter(ParameterSetName = 'Install')][Parameter(ParameterSetName = 'Update')][ValidateRange(0, 24)][int]$UiSessionHours = 0,
     [Parameter(ParameterSetName = 'Update', Mandatory)][switch]$Update,
     [Parameter(ParameterSetName = 'Verify', Mandatory)][switch]$Verify,
     [Parameter(ParameterSetName = 'Verify')][switch]$SendTestAlerts,
@@ -1199,17 +1207,29 @@ function Set-AppSettings([hashtable]$Settings) {
 }
 
 function Set-EasyAuth([string]$UiClientId) {
+    $url = "https://management.azure.com$($script:SiteId)/config/authsettingsV2"
+    $login = @{ tokenStore = @{ enabled = $false }; preserveUrlFragmentsForLogins = $true }
+    if ($UiSessionHours -gt 0) {
+        # How long a management UI sign-in lasts. Without it, App Service keeps a sign-in for 8 hours.
+        $login.cookieExpiration = @{ convention = 'FixedTime'; timeToExpiration = ('{0:00}:00:00' -f $UiSessionHours) }
+    }
+    else {
+        # A PUT replaces the whole configuration: keep a length that an earlier run set.
+        $current = if ($DryRun -and -not $script:Site) { $null } else { Get-RestOrNull $url @{ 'api-version' = '2023-12-01' } }
+        $keep = Get-Value (Get-Value (Get-Value $current 'properties') 'login') 'cookieExpiration'
+        if ($keep) { $login.cookieExpiration = $keep }
+    }
     $body = @{ properties = @{
         platform = @{ enabled = $true }
         globalValidation = @{ requireAuthentication = $true; unauthenticatedClientAction = 'RedirectToLoginPage'
                               redirectToProvider = 'azureactivedirectory'; excludedPaths = $script:KeyEndpoints }
         httpSettings = @{ requireHttps = $true }
-        login = @{ tokenStore = @{ enabled = $false }; preserveUrlFragmentsForLogins = $true }
+        login = $login
         identityProviders = @{ azureActiveDirectory = @{
             enabled = $true
             registration = @{ clientId = $UiClientId; openIdIssuer = "https://login.microsoftonline.com/$($script:TenantId)/v2.0" }
             validation = @{ allowedAudiences = @($UiClientId) } } } } }
-    $null = Set-ArmResource "https://management.azure.com$($script:SiteId)/config/authsettingsV2" '2023-12-01' $body `
+    $null = Set-ArmResource $url '2023-12-01' $body `
         'Turn on App Service Authentication for /api/manage (Entra ID)'
     Write-Ok 'Management UI sign-in: Entra ID, Monitor.Admin role'
 }
@@ -1926,6 +1946,8 @@ Options:
                              block sign-in, and turn off inbox rules. They stay off until you
                              turn them on in the management UI.
   -UiAdmins <upn>,<upn>      More management UI admins. You get the role automatically.
+  -UiSessionHours <1-24>     How long a management UI sign-in lasts. Default: 8 hours. Later runs
+                             keep the value.
   -DryRun                    Show each change. Make no change.
   -Yes                       Ask no questions.
   -Help                      Show this text. Details: Get-Help ./install.ps1 -Detailed

@@ -847,6 +847,43 @@ Describe 'Health alert receivers on a mailbox change' {
     }
 }
 
+Describe 'Management UI session length (-UiSessionHours)' {
+    BeforeAll {
+        New-FakeAzure
+        Mock Start-Sleep {}
+        Mock Read-Host { 'y' }
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200; Content = '{"status":"healthy","checks":{"azure_ad_token":"ok"}}' } }
+        $DryRun = $false; $Yes = $true; $Update = $false; $Tenant = ''
+        $AdminEmail = 'security@contoso.com'; $Location = 'eastus'; $Name = 'm365-ato-monitor'
+        $ResponsePermissions = 'no'; $MailSendScope = 'tenant'; $UiAdmins = @(); $SubscriptionId = ''
+        $UiSessionHours = 0
+        Install-Monitor
+    }
+
+    It 'sets no length by default (the App Service default of 8 hours)' {
+        $auth = @(Get-Calls '^rest --method PUT .*authsettingsV2')
+        $auth | Should -HaveCount 1
+        $auth[0].Body.properties.login.PSObject.Properties['cookieExpiration'] | Should -BeNullOrEmpty
+    }
+
+    It 'sets the length, and a later run without the option keeps it' {
+        $global:Fake.Calls.Clear()
+        $UiSessionHours = 1
+        Set-EasyAuth 'ui-client'
+        $auth = @(Get-Calls '^rest --method PUT .*authsettingsV2')
+        $auth | Should -HaveCount 1
+        $auth[0].Body.properties.login.cookieExpiration.timeToExpiration | Should -Be '01:00:00'
+        $auth[0].Body.properties.login.cookieExpiration.convention | Should -Be 'FixedTime'
+
+        $global:Fake.Calls.Clear()
+        $UiSessionHours = 0
+        Set-EasyAuth 'ui-client'
+        # Unchanged: no PUT. A PUT would have to carry the same length.
+        $put = @(Get-Calls '^rest --method PUT .*authsettingsV2')
+        if ($put.Count) { $put[0].Body.properties.login.cookieExpiration.timeToExpiration | Should -Be '01:00:00' }
+    }
+}
+
 Describe 'Organization metadata across tenants' {
     BeforeEach {
         $script:TenantId = 'next-tenant'

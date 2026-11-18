@@ -160,6 +160,11 @@ Revoke sessions and Block sign-in apply at once to new sign-ins and to refresh t
 
 A CAE app gets long-lived tokens (up to 28 hours): it relies on CAE to stop. A password reset, and turning on MFA for the user, are CAE events too.
 
+The management UI of this monitor is not a CAE app. Its sign-in (App Service Authentication) lasts 8 hours and does not end when you block the admin or revoke the admin's sessions. Two options, both off by default:
+
+- `./install.ps1 -Update -UiSessionHours 1`: a sign-in lasts 1 hour (1 to 24). Later runs keep the value. After that time, the page signs in again through Entra ID, usually with no prompt.
+- Settings > Management UI access > **End the session of a blocked or revoked admin**: each request reads the admin's account from Microsoft Graph (at most once a minute) and is refused if the account is blocked, or its sessions were revoked after the sign-in. If Graph does not answer, the request is allowed. Needs `User.Read.All` (the response permissions).
+
 To test a revoke, sign in to Outlook on the web and Outlook desktop, revoke, then use each app. The desktop app asks for a sign-in within some minutes; the web app can keep working for up to about 90 minutes. For an active attacker, block sign-in and revoke, then reset the password: each is a CAE event. Source: Microsoft Learn, [Continuous access evaluation](https://learn.microsoft.com/entra/identity/conditional-access/concept-continuous-access-evaluation) and [Access token lifetime](https://learn.microsoft.com/entra/identity-platform/configurable-token-lifetimes).
 
 `install.ps1` grants `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `User.Read.All`, and `MailboxSettings.ReadWrite` together: the response permissions. The script asks for them (default yes), or use `-ResponsePermissions yes`. A button is disabled, with the reason, when the permission is not granted. To grant the permissions later, run `./install.ps1 -ResponsePermissions yes`.

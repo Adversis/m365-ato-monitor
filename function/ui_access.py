@@ -18,6 +18,8 @@ access (admin_api.guard).
 import logging
 import re
 import time
+from datetime import datetime, timezone
+from typing import Optional
 
 import config
 from o365_client import token_manager
@@ -107,6 +109,72 @@ def role_members(role_ids) -> dict:
     return out
 
 
+_USERS = "https://graph.microsoft.com/v1.0/users"
+_ACCOUNT_SECONDS = 60
+_accounts = {}  # object ID -> (time, {"enabled": bool, "valid_from": str})
+
+
+def _account(oid: str) -> Optional[dict]:
+    """accountEnabled and signInSessionsValidFromDateTime of a user (Graph, User.Read.All). Cached 60 seconds.
+
+    None if Graph refused or failed (cached 30 seconds).
+    """
+    hit = _accounts.get(oid)
+    if hit and time.monotonic() < hit[0]:
+        return hit[1]
+    try:
+        headers = {"Authorization": f"Bearer {token_manager.get_graph_token()}"}
+        resp = config.http.get(f"{_USERS}/{oid}", headers=headers, timeout=20,
+                               params={"$select": "accountEnabled,signInSessionsValidFromDateTime"})
+        if resp.status_code != 200:
+            raise RuntimeError(f"Graph HTTP {resp.status_code}")
+        data = resp.json()
+        info = {"enabled": data.get("accountEnabled") is not False,
+                "valid_from": str(data.get("signInSessionsValidFromDateTime") or "")}
+        ttl = _ACCOUNT_SECONDS
+    except Exception as e:
+        logging.warning(f"UI access: account state not read: {type(e).__name__}: {config.redact(e)}")
+        info, ttl = None, _ERROR_CACHE_SECONDS
+    _accounts[oid] = (time.monotonic() + ttl, info)
+    return info
+
+
+def _utc(value) -> Optional[datetime]:
+    try:
+        if isinstance(value, (int, float)) or str(value).isdigit():
+            return datetime.fromtimestamp(int(value), tz=timezone.utc)
+        dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def session_refused(user: dict) -> str:
+    """UI_ACCOUNT_CHECK: why this management UI session must end, or "" to allow it.
+
+    The App Service sign-in cookie does not depend on the Entra ID session: a blocked admin, or
+    one whose sessions were revoked, keeps it until it expires. With the check on, each request
+    reads the account: blocked, or sessions revoked after this sign-in (``iat``): refused. If
+    Graph cannot answer, the request is allowed (logged), so that an outage cannot lock out
+    every admin.
+    """
+    if not config.UI_ACCOUNT_CHECK:
+        return ""
+    oid = str(user.get("oid") or "").lower()
+    if not _GUID_RE.match(oid):
+        return ""
+    info = _account(oid)
+    if info is None:
+        return ""
+    if not info["enabled"]:
+        return "the account is blocked"
+    valid_from, issued = _utc(info["valid_from"]), _utc(user.get("iat"))
+    if valid_from and issued and valid_from > issued:
+        return "the account's sessions were revoked after this sign-in"
+    return ""
+
+
 def clear_cache() -> None:
     _cache.clear()
+    _accounts.clear()
 
