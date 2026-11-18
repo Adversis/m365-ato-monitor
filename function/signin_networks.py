@@ -15,6 +15,9 @@ user:
   nets    {network: [first sign-in, last sign-in]}, kept NETWORK_DAYS after the last
           ("last" moves in steps of one day)
   recent  [[start, end, ip], ...]: the sign-ins of the last RECENT_HOURS, as time ranges per IP
+  asns    {ASN: [first sign-in, last sign-in]}: the network providers of sign-ins from clean IPs
+          (not VPN, proxy, hosting, or Tor), kept NETWORK_DAYS after the last. A mobile carrier
+          gives a phone new IPv6 networks often; the provider stays the same (known_asn)
   updated the last write; the weekly clean-up deletes rows with no write in NETWORK_DAYS
 
 network_backfill.py loads the sign-ins of the last 30 days from the audit log once, so that
@@ -49,6 +52,7 @@ WINDOW_BEFORE = timedelta(minutes=60)
 WINDOW_AFTER = timedelta(minutes=10)    # clocks of different services differ a little
 _MAX_NETS = 300
 _MAX_RECENT = 100
+_MAX_ASNS = 50
 
 
 def network_of(ip: str) -> str:
@@ -77,7 +81,7 @@ def _iso(dt: datetime) -> str:
 
 def _parse_row(row) -> dict:
     out = {"since": str(row.get("since") or ""), "etag": (getattr(row, "metadata", None) or {}).get("etag")}
-    for name, empty in (("nets", {}), ("recent", [])):
+    for name, empty in (("nets", {}), ("recent", []), ("asns", {})):
         try:
             value = json.loads(row.get(name) or "null")
         except ValueError:
@@ -104,11 +108,14 @@ _LAST_STEP = timedelta(days=1)         # "last" only serves the NETWORK_DAYS cle
 _MAX_FAILURES = 3                      # storage is down: stop for this run instead of N failing calls
 
 
-def record(table, login_records: list, now: datetime, since: Optional[datetime] = None) -> bool:
+def record(table, login_records: list, now: datetime, since: Optional[datetime] = None,
+           asn_lookup=None) -> bool:
     """Add the successful sign-ins (UserLoggedIn) of ``login_records`` to each user's row.
 
     ``since``: the start of the period that ``login_records`` covers completely (the backfill of
-    past sign-ins). A row that gets sign-ins here starts no later than it. False if a write failed.
+    past sign-ins). A row that gets sign-ins here starts no later than it. ``asn_lookup``:
+    called once with the distinct IPs; returns {ip: "AS123"} for the clean IPs (no entry for a
+    flagged or unknown IP). False if a write failed.
     """
     if table is None:
         return False
@@ -124,6 +131,13 @@ def record(table, login_records: list, now: datetime, since: Optional[datetime] 
             continue
         if "@" in user and net:
             by_user.setdefault(user, []).append((when, ip, net))
+    asns = {}
+    if asn_lookup and by_user:
+        try:
+            asns = asn_lookup(sorted({ip for signins in by_user.values() for _, ip, _ in signins})) or {}
+        except Exception as e:
+            logging.warning(f"Sign-in network providers not read: {type(e).__name__}")
+    by_user = {u: [(w, ip, net, str(asns.get(ip) or "")) for w, ip, net in v] for u, v in by_user.items()}
     failed, ok = 0, True
     for user, signins in by_user.items():
         try:
@@ -151,24 +165,40 @@ def _ranges(recent: list) -> list:
     return out
 
 
+def _seen(table: dict, key: str, t: str) -> bool:
+    """Add a sign-in time to ``table`` ({key: [first, last]}). True if it changed."""
+    old = table.get(key)
+    if not old:
+        table[key] = [t, t]
+        return True
+    # Records can arrive out of order: keep the earliest first. "last" moves in steps.
+    first = min(old[0], t)
+    last = t if t > old[1] and _time(t) - _time(old[1]) >= _LAST_STEP else old[1]
+    if [first, last] != old[:2]:
+        table[key] = [first, last]
+        return True
+    return False
+
+
+def _keep(table: dict, now: datetime, limit: int) -> dict:
+    keep = _iso(now - timedelta(days=NETWORK_DAYS))
+    kept = {k: v for k, v in table.items() if v[1] >= keep}
+    if len(kept) > limit:
+        kept = dict(sorted(kept.items(), key=lambda kv: kv[1][1])[-limit:])
+    return kept
+
+
 def _merge(row: dict, signins: list, now: datetime) -> tuple:
-    """(nets, recent, changed) after adding ``signins`` to ``row``."""
+    """(nets, recent, asns, changed) after adding ``signins`` ((when, ip, net, asn)) to ``row``."""
     nets = {n: list(v) for n, v in (row.get("nets") or {}).items()}
+    asns = {a: list(v) for a, v in (row.get("asns") or {}).items()}
     recent = _ranges(row.get("recent"))
     changed = not row
-    for when, ip, net in sorted(signins):
+    for when, ip, net, asn in sorted(signins):
         t = _iso(when)
-        old = nets.get(net)
-        if not old:
-            nets[net] = [t, t]
-            changed = True
-        else:
-            # Records can arrive out of order: keep the earliest first. "last" moves in steps.
-            first = min(old[0], t)
-            last = t if t > old[1] and _time(t) - _time(old[1]) >= _LAST_STEP else old[1]
-            if [first, last] != old[:2]:
-                nets[net] = [first, last]
-                changed = True
+        changed = _seen(nets, net, t) or changed
+        if asn:
+            changed = _seen(asns, asn, t) or changed
         for rng in recent:
             if rng[2] == ip and _time(rng[0]) - _MERGE_GAP <= when <= _time(rng[1]) + _MERGE_GAP:
                 if t < rng[0]:
@@ -179,14 +209,12 @@ def _merge(row: dict, signins: list, now: datetime) -> tuple:
         else:
             recent.append([t, t, ip])
             changed = True
-    keep_net = _iso(now - timedelta(days=NETWORK_DAYS))
-    kept = {n: v for n, v in nets.items() if v[1] >= keep_net}
-    if len(kept) > _MAX_NETS:
-        kept = dict(sorted(kept.items(), key=lambda kv: kv[1][1])[-_MAX_NETS:])
+    kept, kept_asns = _keep(nets, now, _MAX_NETS), _keep(asns, now, _MAX_ASNS)
     keep_recent = _iso(now - timedelta(hours=RECENT_HOURS))
     recent2 = sorted(r for r in recent if r[1] >= keep_recent)[-_MAX_RECENT:]
-    changed = changed or len(kept) != len(nets) or len(recent2) != len(recent)
-    return kept, recent2, changed
+    changed = (changed or len(kept) != len(nets) or len(recent2) != len(recent)
+               or len(kept_asns) != len(asns))
+    return kept, recent2, kept_asns, changed
 
 
 def _record_user(table, user: str, signins: list, now: datetime, since: Optional[datetime] = None) -> None:
@@ -194,7 +222,7 @@ def _record_user(table, user: str, signins: list, now: datetime, since: Optional
         row = _rows.get(user) if attempt == 0 else None
         if row is None:
             row = _load(table, user)
-        nets, recent, changed = _merge(row, signins, now)
+        nets, recent, asns, changed = _merge(row, signins, now)
         start = row.get("since") or _iso(now)
         if since is not None and _iso(since) < start:
             start, changed = _iso(since), True
@@ -203,7 +231,8 @@ def _record_user(table, user: str, signins: list, now: datetime, since: Optional
             return
         entity = {"PartitionKey": _PARTITION, "RowKey": _key(user), "upn": user,
                   "since": start, "updated": _iso(now),
-                  "nets": json.dumps(nets, sort_keys=True), "recent": json.dumps(recent)}
+                  "nets": json.dumps(nets, sort_keys=True), "recent": json.dumps(recent),
+                  "asns": json.dumps(asns, sort_keys=True)}
         try:
             if row.get("etag"):
                 table.update_entity(entity, mode=UpdateMode.REPLACE, etag=row["etag"],
@@ -276,6 +305,18 @@ def known(row: dict, ip: str, when: datetime, before: timedelta = WINDOW_BEFORE)
     if not any(_version(n) == version for n in nets):
         return None
     first = (nets.get(net) or [""])[0]
+    return bool(first) and first < _iso(when - before)
+
+
+def known_asn(row: dict, asn: str, when: datetime, before: timedelta = WINDOW_BEFORE) -> bool:
+    """True if the user signed in from a clean IP of network provider ``asn`` before the window.
+
+    False without LEARN_DAYS of history: the provider list starts empty (it is filled from clean
+    sign-ins from the update that adds it), so a False only keeps the alert.
+    """
+    if not asn or not _history(row, when - before):
+        return False
+    first = ((row.get("asns") or {}).get(asn) or [""])[0]
     return bool(first) and first < _iso(when - before)
 
 

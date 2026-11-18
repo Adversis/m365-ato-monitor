@@ -269,7 +269,7 @@ Full list: [Architecture: detection limits](docs/ARCHITECTURE.md#detection-limit
 
 ## Cost
 
-About $2–10 per month for a small tenant, mostly for the Function App and the logs. The change alerts add less than $1. Breakdown: [Architecture: costs](docs/ARCHITECTURE.md#costs). To get a warning, set a Cost Management budget on the resource group.
+About $1.50 per month for a small tenant: measured $1.30 and $1.50 per month in two small tenants (November 2026). Almost all of it is fixed: storage operations of the Functions host and one log alert rule. The Function App and the logs stay inside Azure's free monthly allowances. Breakdown and what grows with tenant size: [Architecture: costs](docs/ARCHITECTURE.md#costs). To get a warning, set a Cost Management budget on the resource group.
 
 ## FAQ
 
@@ -277,7 +277,7 @@ About $2–10 per month for a small tenant, mostly for the Function App and the 
 
 | | This monitor | Entra ID P2 |
 | --- | --- | --- |
-| Cost | Free (MIT license). Azure resources: about $2–10 per month for a small tenant | $10 per user per month, paid yearly ([Microsoft list price](https://www.microsoft.com/security/business/microsoft-entra-pricing)). Included in Microsoft 365 E5 |
+| Cost | Free (MIT license). Azure resources: about $1.50 per month for a small tenant | $10 per user per month, paid yearly ([Microsoft list price](https://www.microsoft.com/security/business/microsoft-entra-pricing)). Included in Microsoft 365 E5 |
 | When | After Microsoft publishes the audit record: minutes to hours | At each sign-in |
 | Response | Email. Optional: revoke sessions, block sign-in, turn off the rule, after the alert | Risk-based Conditional Access: ask for MFA or a password change, or block the sign-in |
 

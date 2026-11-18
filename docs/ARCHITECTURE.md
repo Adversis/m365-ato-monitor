@@ -224,7 +224,7 @@ Two kinds of finding are journaled without an email:
 
   - Neither the user nor the admin had another emailed alert in the 7 days before. An alert triaged Benign does not count.
   - A sign-in by the person who made the change was seen in the hour before the change.
-  - Every such sign-in came from a network that this person used before.
+  - Every such sign-in came from a network that this person used before. Or there is one new network, its IP is clean (`analyze_ip`), and its provider (ASN) is one that this person signed in from before from a clean IP (`signin_networks.known_asn`). The row keeps these providers (`asns`) from clean sign-ins only (`function_app._clean_asns`, from the IP cache).
 
   When this person's network history is shorter than 14 days, the monitor also sends no email (the reason says so), unless there was another alert. When the monitor has no sign-in of this person at all (for example an admin of a partner tenant), it sends email.
 
@@ -368,16 +368,18 @@ The Functions host uses the same managed identity for its storage (`AzureWebJobs
 
 ## Costs
 
-Estimates for a small tenant: about $2–10 per month. Your cost depends on log volume and region.
+Measured in two small tenants, 1–18 November 2026 (Azure Cost Management, actual cost): $0.88 and $0.78, about $1.30–1.50 per month. Almost all of it is fixed. The Function App and the logs used a small part of Azure's free monthly allowances.
 
-| Resource | Monthly cost | Notes |
-|---|---|---|
-| Function App (Flex Consumption, 512 MB) | $1–3 | The 2-minute timer uses most of it. Price: $0.000026 per GB-s in most regions ($0.000037 in some) and $0.40 per million executions. Each execution is billed for at least 1 second. Free grant per subscription and month: 100,000 GB-s and 250,000 executions, shared by all Flex Consumption apps in the subscription |
-| Storage account | $1–2 | Tables, timer state, and the code package |
-| Application Insights / Log Analytics | $0–5 | Log ingestion. Depends on log volume |
-| Azure Monitor log alerts | Small per-rule charge | 2 rules at a 30-minute frequency, 1 rule at a 15-minute frequency. See [Azure Monitor pricing](https://azure.microsoft.com/pricing/details/monitor/) |
-| Activity log alert | $0 | Activity log alerts have no charge |
-| Storage logs for the code deployment alert | A few cents | The workspace transformation drops all rows except the `deployments` container. Azure can charge a small processing fee for the dropped data |
-| proxycheck.io | $0 | Free tier: 1,000 queries/day with a key |
+| Resource | Measured (18 days) | Free allowance | What drives it |
+|---|---|---|---|
+| Storage operations | $0.40–0.47 | none | Blob reads and writes of the Functions host (timer state, leases, the code package), plus the app's tables. Mostly fixed. The data stored costs less than $0.01 |
+| Log alert rule, 15-minute frequency (code deployed) | $0.37–0.41 | none | A flat fee per rule, about $0.50 per month. The two 30-minute rules on Application Insights cost less than $0.01 |
+| Function App (Flex Consumption, 512 MB) | $0 | 100,000 GB-s and 250,000 executions per subscription and month | The timers (every 2 and every 5 minutes) are about 30,000 executions per month at any tenant size. Used: 8,200–10,600 GB-s in 18 days, about 15% of the allowance. Above it: $0.000026 per GB-s ($0.000037 in some regions), $0.40 per million executions |
+| Log Analytics ingestion | $0 | 5 GB per billing account and month | 0.4 GB in 18 days, about 15% of the allowance. Above it: about $2.30 per GB. Retention: 90 days (`install.ps1`) |
+| Activity log alert, proxycheck.io (free key) | $0 | | |
+
+The free allowances are shared: other Flex Consumption apps in the subscription, and other Log Analytics workspaces of the billing account, use them too.
+
+What grows with tenant size: the run time per run (more audit records), the table operations (one row per record for deduplication), and the log volume. In these two tenants, each was about 15% of its free allowance. Log volume is the part to watch in a large tenant: each GB above 5 GB per month is about $2.30. To check your own bill: Azure portal > Cost Management > Cost analysis, scope the resource group `rg-<name>`, group by Meter.
 
 Azure has no spending limit for pay-as-you-go subscriptions. Set a Cost Management budget on the resource group to get a warning.

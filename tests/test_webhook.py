@@ -150,3 +150,14 @@ class TestNoticesAndDigest:
             ok = alerting.send_login_digest([{"user": "u@contoso.com", "ip": "203.0.113.9", "flags": "vpn"}],
                                             outbox=outbox)
         assert ok and len(outbox.partition("outbox")) == 1
+
+
+def test_compromise_webhook_text_names_the_network():
+    import alerting
+    from unittest.mock import patch as _patch
+    finding = {"type": "mfa_change", "severity": "medium", "user": "jane@contoso.com",
+               "description": "An MFA method was added.", "ip": "2001:db8::1", "asn": "AS64500",
+               "network": "Example Wireless", "event": {"Id": "x", "CreationTime": "2026-11-18T22:24:55"}}
+    with _patch("alerting._deliver", return_value=True) as deliver:
+        alerting.send_compromise_alert(finding, ip_context="Changed after a sign-in from 2001:db8::1")
+    assert "Network: Example Wireless (AS64500)." in deliver.call_args.kwargs["summary"]

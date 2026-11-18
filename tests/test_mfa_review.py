@@ -624,3 +624,56 @@ class TestMfaReset:
         assert not send.called and not respond.called
         rows = [r for r in journal.for_user(jt, USER, now - timedelta(days=1)) if r["type"] == "mfa_change"]
         assert rows[0]["status"] == "list only" and rows[0]["triage"] == ""
+
+
+@pytest.mark.usefixtures("settled")
+class TestKnownProvider:
+    """A phone on a mobile carrier gets new networks often (IPv6 /48s): a known provider with a clean IP is known."""
+    OLD_PHONE = "89.160.20.112"          # the carrier network of the user's earlier sign-ins (MaxMind test IP)
+    NEW_PHONE = "81.2.69.160"            # another network of the same carrier (MaxMind test IP)
+    CARRIER = "AS64510"
+
+    def _run(self, answer, history_asn=CARRIER):
+        now = datetime.now(timezone.utc)
+        change = now - timedelta(minutes=60)
+        geo, jt = FakeTable(), FakeTable()
+        lookup = (lambda ips: {ip: history_asn for ip in ips}) if history_asn else None
+        sn.record(geo, [signin(self.OLD_PHONE, now - timedelta(days=30))], now - timedelta(days=30), asn_lookup=lookup)
+        sn.record(geo, [signin(self.NEW_PHONE, change - timedelta(minutes=3))], now)
+        with patch("geo_monitor.table_client", return_value=geo), \
+                patch("journal.table_client", return_value=jt), \
+                patch("geo_monitor.is_unusual", return_value=False), \
+                patch("function_app.check_ips_batch", return_value={self.NEW_PHONE: answer}), \
+                patch("function_app.send_compromise_alert", return_value=True) as send:
+            fa._run_compromise_check(FakeTable(), None, set(), [mfa_record(change)])
+        rows = [r for r in journal.for_user(jt, USER, now - timedelta(days=1)) if r["type"] == "mfa_change"]
+        return send, rows
+
+    def test_same_carrier_clean_ip_is_a_known_sign_in(self):
+        send, rows = self._run({"proxy": "no", "type": "Wireless", "risk": 0, "asn": self.CARRIER,
+                                "organisation": "Example Wireless"})
+        assert not send.called
+        assert rows[0]["status"] == "known sign-in"
+        assert "Example Wireless, AS64510" in rows[0]["action"]
+
+    def test_new_carrier_still_alerts(self):
+        send, _ = self._run({"proxy": "no", "type": "Wireless", "risk": 0, "asn": "AS64511"})
+        assert send.called
+
+    def test_flagged_ip_on_a_known_carrier_still_alerts(self):
+        # A mobile proxy on the user's own carrier, which proxycheck.io flags.
+        send, _ = self._run({"proxy": "yes", "type": "Proxy", "risk": 100, "asn": self.CARRIER})
+        assert send.called and send.call_args.args[0]["severity"] == "high"
+
+    def test_history_without_providers_still_alerts(self):
+        # Rows written before the update have no providers: the alert stays.
+        send, _ = self._run({"proxy": "no", "type": "Wireless", "risk": 0, "asn": self.CARRIER}, history_asn=None)
+        assert send.called
+
+
+def test_flagged_sign_in_does_not_make_a_known_provider():
+    cache = FakeTable()
+    from ip_checker import cache_ip_result
+    cache_ip_result("81.2.69.160", {"proxy": "yes", "type": "VPN", "risk": 73, "asn": "AS64500"}, cache)
+    cache_ip_result("89.160.20.112", {"proxy": "no", "type": "Wireless", "risk": 0, "asn": "AS64510"}, cache)
+    assert fa._clean_asns(["81.2.69.160", "89.160.20.112", "192.0.2.1"], cache) == {"89.160.20.112": "AS64510"}

@@ -612,6 +612,10 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
     )
     subject = f"{ALERT_TAG} {subject_prefix}{severity}: {short} - {raw_user}"
     summary = f"{raw_user}: {description}" + (f" {ip_context}." if ip_context else "")
+    # The webhook has no details table: name the source network (an IP alone says little).
+    net, asn = str(finding.get("network") or ""), str(finding.get("asn") or "")
+    if (net or asn) and (net or asn) not in summary:
+        summary += " Network: " + (f"{net} ({asn})" if net and asn else net or asn) + "."
     return _deliver(subject, body, outbox, summary=summary, link=ui_link("user", raw_user) if "@" in raw_user else "")
 
 
@@ -729,7 +733,7 @@ def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=Non
     )
     subject = (f"{ALERT_TAG} {confidence.upper()}: Suspicious sign-in - {raw_user} from {ip}, "
                f"{_subject_result(result)}")
-    return _deliver(subject, body, outbox, summary=f"{raw_user}: {result} sign-in from {ip} ({flags}, {location}).",
+    return _deliver(subject, body, outbox, summary=f"{raw_user}: {result} sign-in from {ip} ({flags}{service}, {network}, {location}).",
                     link=ui_link("user", raw_user) if "@" in raw_user else "")
 
 

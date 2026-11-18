@@ -480,7 +480,7 @@ A method replaced, an Authenticator device replaced, or the default method chang
 
 A method added by the user or by an admin sends no email if both of these are true:
 
-- The sign-in of the person who made the change (in the hour before) came from a network that they used before.
+- The sign-in of the person who made the change (in the hour before) came from a network that they used before. A new network also counts if its IP is clean (not VPN, proxy, hosting, or Tor) and its provider (ASN) is one that they signed in from before, for example their mobile carrier.
 - Neither the user nor the admin had another alert in 7 days.
 
 The change then shows in the alert list as "Known sign-in". The alert says which case applies: another alert, a sign-in from a new network (its IP), or no sign-in seen. After an install or the update that adds this, the monitor loads 30 days of past sign-ins from the audit log, once. While a user's network history is shorter than 14 days, a change sends no email unless there was another alert ("Known sign-in", the reason says so).

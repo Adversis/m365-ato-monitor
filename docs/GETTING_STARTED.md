@@ -56,7 +56,7 @@ To create a subscription on a billing profile, you need one of these roles:
 
 You become Owner of the new subscription.
 
-Run `az login` again. `az account show --query tenantId -o tsv` must show your tenant ID. The monitor costs about $2–10 per month ([Costs](ARCHITECTURE.md#costs)).
+Run `az login` again. `az account show --query tenantId -o tsv` must show your tenant ID. The monitor costs about $1.50 per month for a small tenant ([Costs](ARCHITECTURE.md#costs)).
 
 | Other situations | Do this |
 |---|---|

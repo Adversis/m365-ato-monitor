@@ -313,7 +313,8 @@ def audit_log_monitor(timer: func.TimerRequest) -> None:
     try:
         # Before the compromise check: its MFA change check reads them.
         signin_networks.record(geo_monitor.table_client() if events_table else None,
-                               filter_login_records(aad), started)
+                               filter_login_records(aad), started,
+                               asn_lookup=lambda ips: _clean_asns(ips, ip_cache_table))
     except Exception:
         logging.exception("Sign-in networks not kept")
     try:
@@ -769,7 +770,8 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
         _drop_held(events_table, held, processed_keys)
         return
     # The sign-in networks of an MFA change, before the IP lookups: a new network's IP is looked up too.
-    mfa_networks = {id(f): _mfa_networks(f, geo_table, now) for f in new_findings if mfa_method_change(f)}
+    mfa_new = {}     # id(finding) -> the IPs of new networks in the hour before the change
+    mfa_networks = {id(f): _mfa_networks(f, geo_table, now, mfa_new) for f in new_findings if mfa_method_change(f)}
     # Findings that need context last: the other alerts of this batch are in the journal first.
     new_findings.sort(key=lambda f: 1 if _needs_context(f) else 0)
 
@@ -813,6 +815,11 @@ def _run_compromise_check(events_table, ip_cache_table, processed_keys: set, eve
                 finding["severity"] = "high"
         # An MFA method change or a rule that only deletes mail: an email only with context.
         if _needs_context(finding) and finding["severity"] != "high":
+            # One new network, a clean IP, a provider that the person used before: a known sign-in.
+            if mfa_new.get(id(finding)) == [ip] and ip in ip_results:
+                provider = _known_provider(finding, geo_table, ip_results[ip], now)
+                if provider:
+                    mfa_networks[id(finding)] = (provider, "", False)
             rule_ip = ip if ip and id(finding) not in service_ip and ip in finding_ips else ""
             quiet, context, wait = _context_review(finding, geo_table, now, mfa_networks.get(id(finding)),
                                                    rule_ip, ip_unchecked)
@@ -878,7 +885,7 @@ def _accounts(finding: dict) -> tuple:
     return user, (actor if admin else user), admin
 
 
-def _mfa_networks(finding: dict, geo_table, now: datetime) -> tuple:
+def _mfa_networks(finding: dict, geo_table, now: datetime, new_ips: Optional[dict] = None) -> tuple:
     """(quiet reason, alert context, wait) from the sign-ins in the hour before an MFA change.
 
     The person who signed in is the user (My Sign-ins; the MFA service writes the record) or,
@@ -907,11 +914,48 @@ def _mfa_networks(finding: dict, geo_table, now: datetime) -> tuple:
         return "", f"No sign-in by {who} was seen in the hour before the change", True
     if seen["new"]:
         finding["ip"] = seen["new"][0]
+        if new_ips is not None:
+            new_ips[id(finding)] = list(seen["new"])
         return "", (f"Changed after a sign-in by {who} from {seen['new'][0]}, a network that "
                     f"{'they' if admin else 'the user'} did not use before"), False
     return (f"No email: changed after a sign-in by {who} from {', '.join(seen['ips'])} (a network used "
             f"before), and {'neither account' if admin else 'the user'} had no other alert in the "
             f"{MFA_PRIOR_DAYS} days before"), "", True
+
+
+def _clean_asns(ips: list, ip_cache_table) -> dict:
+    """{ip: "AS123"} for the IPs whose cached lookup is clean (the login check looked them up).
+
+    Cache only (no proxycheck.io query). A flagged IP's provider does not become a known provider.
+    """
+    out = {}
+    for ip, data in check_ips_batch(ips, ip_cache_table, cache_only=True).items():
+        asn = config.normalize_asn(data.get("asn"))
+        if asn and not analyze_ip(data)["is_suspicious"]:
+            out[ip] = asn
+    return out
+
+
+def _known_provider(finding: dict, geo_table, ip_data: dict, now: datetime) -> str:
+    """The quiet reason for an MFA change after a sign-in from a new network of a known provider.
+
+    "" unless the one new sign-in IP is clean and its network provider (ASN) is one that the
+    person signed in from (from a clean IP) before. Example: a phone on a mobile carrier, which
+    gets a new IPv6 network often. A flagged IP, or a provider that is new, still alerts.
+    """
+    if analyze_ip(ip_data)["is_suspicious"]:
+        return ""
+    asn = config.normalize_asn(ip_data.get("asn"))
+    _, signer, admin = _accounts(finding)
+    row = signin_networks.view(geo_table, signer)
+    if not signin_networks.known_asn(row, asn, journal.event_time(finding.get("event") or {}, now)):
+        return ""
+    who = signer if admin else "the user"
+    name = network_fields(ip_data)["network"]
+    return (f"No email: changed after a sign-in by {who} from {finding.get('ip')}, a new network of a provider "
+            f"that {'they' if admin else 'the user'} signed in from before ({name + ', ' if name else ''}{asn}), "
+            f"from a clean IP, and {'neither account' if admin else 'the user'} had no other alert in the "
+            f"{MFA_PRIOR_DAYS} days before")
 
 
 def _history_age(row: dict, now: datetime) -> str:
