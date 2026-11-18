@@ -51,7 +51,7 @@ Do these steps in this order for a real or unconfirmed alert. If the attacker is
 
 1. **Revoke sessions.**
    - Management UI > Users > the user > **Revoke sessions** (needs `User.RevokeSessions.All`). Or: Entra admin center > Users > the user > **Revoke sessions**. Or: Microsoft 365 admin center > Users > Active users > the user > **Sign out of all sessions**.
-   - This stops refresh tokens and browser sessions, a stolen session cookie too. Access tokens that are already issued stay valid until they expire, usually within about 1 hour.
+   - This stops refresh tokens and browser sessions, a stolen session cookie too. Apps that are signed in already stop within about 15 minutes (Outlook, OneDrive, and Office apps: continuous access evaluation) or when their access token expires (60 to 90 minutes: web apps, other clients). See [How fast a revoke or block applies](HOW_TO.md#how-fast-a-revoke-or-block-applies).
    - A password reset alone does not end a stolen session.
 2. **Reset the password.**
    - Microsoft 365 admin center > Users > Active users > the user > **Reset password**.

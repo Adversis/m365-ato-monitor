@@ -190,6 +190,8 @@ The monitor can revoke a user's sessions, block sign-in, or turn off an inbox ru
 | Never change these accounts | Break-glass and admin accounts. The alert mailbox is always exempt |
 | Maximum account actions per day | A limit, so that a wrong result cannot lock out many users |
 
+A revoke does not stop every app at once: Outlook desktop and other apps with continuous access evaluation stop within about 15 minutes, web apps and other clients when their access token expires (60 to 90 minutes). See [How fast a revoke or block applies](docs/HOW_TO.md#how-fast-a-revoke-or-block-applies).
+
 The response never changes passwords. It does not act on alerts about admin changes or app consents, and Microsoft Graph refuses changes to admin accounts. It acts only on the account that signed in, or on an account that changed its own mailbox or MFA. A change that one account made to another account gets no action, because either account can be the compromised one. The same actions are also buttons on each user's page in the management UI. Details: [How-To: Respond automatically](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).
 
 A wrong-password sign-in never triggers an account action, even if **Email failed sign-ins** is on. A high sign-in alert can trigger an action after a successful sign-in or a correct password stopped by MFA or Conditional Access.
@@ -259,6 +261,29 @@ About $2–10 per month for a small tenant, mostly for the Function App and the 
 ### Does it work with Entra ID P1 or P2?
 
 Yes. It reads the audit log, which every plan has. With P2, Entra ID Protection also scores risky sign-ins and can respond to them. The monitor still adds alerts for mailbox and tenant changes, such as inbox rules, forwarding, and app consents.
+
+### How does it compare with Entra ID Protection (P2)?
+
+They work at different times. ID Protection scores each sign-in when it happens. With Entra ID P2, a risk-based Conditional Access policy can then ask for MFA or a secure password change, or block the sign-in. This monitor reads the audit log after Microsoft publishes it (minutes to hours later). It reports, and can revoke sessions or block sign-in after an alert. It does not stop a sign-in.
+
+Without P2 (Free, P1, Business Premium), ID Protection shows only "Additional risk detected" with no details, the Risky users report shows medium and high users with no details, and risk-based policies, "users at risk" alerts, and the weekly digest are not available.
+
+| ID Protection detection (license) | This monitor |
+| --- | --- |
+| Anonymous IP address (Free) | Suspicious sign-in IP: VPN, Tor, proxy, and hosting addresses (proxycheck.io) |
+| Atypical travel (P2); impossible travel, new country (P2 and Defender for Cloud Apps) | New country, after 14 days of learning. Stolen session: one session used from two countries |
+| Anomalous token (P2); attacker in the middle (Microsoft 365 E5) | Stolen session: one session used from two countries, or moved to a VPN, proxy, hosting, or Tor IP. Not a session used from a normal network in the user's own country |
+| Unfamiliar sign-in properties (P2) | No general check. New networks count only for MFA changes and inbox rules that only delete mail |
+| Malicious IP, verified threat actor IP (P2); Microsoft Entra threat intelligence (Free) | Partly: the proxycheck.io risk score and flags. No Microsoft threat intelligence |
+| Password spray: a password confirmed in a spray (P2) | No spray detection. Failed sign-ins from a risky IP are kept in the alert history; they send email only with **Email failed sign-ins**. A correct password stopped by MFA always sends email |
+| Leaked credentials (Free) | No |
+| Suspicious inbox forwarding, suspicious inbox manipulation rules (P2 and Defender for Cloud Apps) | Yes: inbox rules, mailbox forwarding, and mail flow rules |
+| Suspicious credential addition (P2) | MFA changes: a method added or replaced, the default method changed |
+| Anomalous user activity: admin changes (P2); token issuer anomaly (P2) | Fixed rules, not a baseline: admin roles, app consents, app credentials, domains and federation |
+| Suspicious sending patterns (P2 and Defender for Office 365) | No. The mail access check flags mail sent from a risky IP, not unusual sending |
+| Mass access to sensitive files, suspicious API traffic, PRT access, user-reported suspicious activity (P2, some with Defender) | No |
+
+The monitor also alerts on changes that ID Protection does not score: mail flow rules, mailbox delegation, audit logging turned off, and mail protection turned off. If you have P2, use risk-based Conditional Access to stop risky sign-ins, and this monitor for the mailbox and tenant changes. Source: Microsoft Learn, [What are risk detections?](https://learn.microsoft.com/entra/id-protection/concept-identity-protection-risks) and [ID Protection licensing](https://learn.microsoft.com/entra/id-protection/overview-identity-protection).
 
 ### Does it block attacks?
 

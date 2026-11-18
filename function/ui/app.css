@@ -555,6 +555,9 @@ table.list td.primary { min-width: 9rem; overflow-wrap: normal; }
 
 @media (min-width: 721px) {
   table.list td.user { white-space: nowrap; overflow-wrap: normal; }
+  /* A very long name (an Exchange service account) is cut; the full name is its title (hover). */
+  table.list td.user .upn { display: block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+  table.list td.desc { min-width: 26ch; }
   .facts-wide { grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); max-width: 760px; }
 }
 

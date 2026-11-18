@@ -237,7 +237,9 @@ function userHash(upn) {
 function userLink(upn) {
   if (!upn) return "-";
   if (upn === "*") return "All users";
-  return upn.includes("@") ? h("a", { href: userHash(upn), class: "upn", text: upn }) : upn;
+  // The full name on hover: a long name (an Exchange service account) is cut in a table.
+  return upn.includes("@") ? h("a", { href: userHash(upn), class: "upn", title: upn, text: upn })
+    : h("span", { class: "upn", title: upn, text: upn });
 }
 
 function lockNote(id, ...content) {
@@ -1574,7 +1576,7 @@ const ACTION_LABELS = { muted: "Mute", "alert off": "No email", microsoft: "No e
 function findingsTable(rows, withUser, onTriaged, selection) {
   const pick = selection ? [["Select", "nowrap", selectAllBox(rows, selection)]] : [];
   const columns = [...pick, ["Time", "nowrap"], ...(withUser ? [["User", "user"]] : []), ["Alert", "primary"], ["Severity", "nowrap"],
-                   ["Email", "nowrap"], ["Triage", "nowrap"], ["Description"]];
+                   ["Email", "nowrap"], ["Triage", "nowrap"], ["Description", "desc"]];
   return table(columns, rows.map((r) => [
     ...(selection ? [selectBox(r, selection)] : []),
     timeCell(r.at),

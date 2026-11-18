@@ -179,11 +179,12 @@ class TestMailboxDelegation:
                         Identity="a", User="b", AccessRights="FullAccess")
         assert cd.detect_mailbox_delegation([event]) == []
 
-    def test_exchange_service_account_ignored(self):
+    @pytest.mark.parametrize("prefix", ["NT SERVICE", "SERVICE"])
+    def test_exchange_service_account_ignored(self, prefix):
         # Seen in a new tenant: Exchange grants Discovery Management FullAccess on the
-        # DiscoverySearchMailbox again every few weeks.
+        # DiscoverySearchMailbox again every few weeks. Records name the account with or without "NT".
         event = _cmdlet("Add-MailboxPermission",
-                        actor="NT SERVICE\\MSExchangeAdminApiNetCore (Microsoft.Exchange.AdminApi.NetCore)",
+                        actor=f"{prefix}\\MSExchangeAdminApiNetCore (Microsoft.Exchange.AdminApi.NetCore)",
                         Identity="DiscoverySearchMailbox{D919BA05-46A6-415f-80AD-7E09334BB852}",
                         User="Discovery Management", AccessRights="FullAccess")
         assert cd.detect_mailbox_delegation([event]) == []

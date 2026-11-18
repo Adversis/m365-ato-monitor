@@ -141,11 +141,26 @@ The page shows the user's alerts for 90 days, sign-in countries, mutes, and acco
 
 | Action | What it does | Graph permission |
 |---|---|---|
-| **Revoke sessions** | Ends refresh tokens and browser sessions. Access tokens already issued stay valid until they expire (usually within about 1 hour) | `User.RevokeSessions.All` |
+| **Revoke sessions** | Ends refresh tokens and browser sessions. Apps that are signed in already stop in minutes to about 1 hour: see [How fast a revoke or block applies](#how-fast-a-revoke-or-block-applies) | `User.RevokeSessions.All` |
 | **Block sign-in** | Sets Account enabled to off, then revokes sessions | `User.EnableDisableAccount.All`, `User.Read.All`, `User.RevokeSessions.All` |
 | **Unblock sign-in** | Sets Account enabled to on | `User.EnableDisableAccount.All`, `User.Read.All` |
 | **Show inbox rules** | Lists the server-side inbox rules with their risk signs | `MailboxSettings.Read` or `MailboxSettings.ReadWrite` (always granted) |
 | **Turn off** / **Turn on** (a rule) | Turns the inbox rule off or on. The rule is kept for investigation | `MailboxSettings.ReadWrite` |
+
+### How fast a revoke or block applies
+
+Revoke sessions and Block sign-in apply at once to new sign-ins and to refresh tokens. An app that is signed in already keeps its access token. When that token stops working depends on the app:
+
+| App | When it stops | Why |
+|---|---|---|
+| Outlook, OneDrive, and the Office desktop and mobile apps, with Exchange Online and SharePoint Online | Usually within some minutes, up to about 15 minutes | Continuous access evaluation (CAE): the service gets the revoke or the block as an event. Microsoft: "latency of up to 15 minutes might be observed because of event propagation time" |
+| Teams | Some minutes to about 1 hour | CAE is partly supported |
+| Office web apps (Outlook on the web and others) in a browser, other apps, and API clients | When the access token expires: 60 to 90 minutes after it was issued (75 on average) | No CAE. The browser session cookie is revoked, but a token that is already issued stays valid |
+| Guest accounts | When the access token expires | CAE does not support guest accounts |
+
+A CAE app gets long-lived tokens (up to 28 hours): it relies on CAE to stop. A password reset, and turning on MFA for the user, are CAE events too.
+
+To test a revoke, sign in to Outlook on the web and Outlook desktop, revoke, then use each app. The desktop app asks for a sign-in within some minutes; the web app can keep working for up to about 90 minutes. For an active attacker, block sign-in and revoke, then reset the password: each is a CAE event. Source: Microsoft Learn, [Continuous access evaluation](https://learn.microsoft.com/entra/identity/conditional-access/concept-continuous-access-evaluation) and [Access token lifetime](https://learn.microsoft.com/entra/identity-platform/configurable-token-lifetimes).
 
 `install.ps1` grants `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `User.Read.All`, and `MailboxSettings.ReadWrite` together: the response permissions. The script asks for them (default yes), or use `-ResponsePermissions yes`. A button is disabled, with the reason, when the permission is not granted. To grant the permissions later, run `./install.ps1 -ResponsePermissions yes`.
 
@@ -417,7 +432,7 @@ Safeguards:
 - The alert mailbox and the accounts in **Never change these accounts** (`ANOMALY_ACTION_EXEMPT`) are never changed. Put break-glass and admin accounts there.
 - At most 3 actions per UTC day (`ANOMALY_ACTION_MAX_PER_DAY`).
 - The app has no directory role, so Graph refuses changes to admin accounts. The alert then shows "failed: HTTP 403". The same error appears if admin consent for the new permission is missing.
-- Revoke stops refresh tokens and browser sessions. Access tokens already issued stay valid until they expire, usually within about 1 hour.
+- Revoke stops refresh tokens and browser sessions. Apps that are signed in already stop within about 15 minutes (CAE apps such as Outlook desktop) or when their access token expires (60 to 90 minutes). See [How fast a revoke or block applies](#how-fast-a-revoke-or-block-applies).
 - The audit record arrives some minutes to 1–2 hours after the sign-in, so the action comes that much later.
 - The app does not reset passwords. A reset needs a safe way to give the user the new password. Reset it by hand.
 

@@ -212,7 +212,8 @@ def _is_system_actor(event: dict) -> bool:
     """Exchange service accounts that change permissions during provisioning.
 
     UserType 3 (DCAdmin) and 4 (System), "NT AUTHORITY\\SYSTEM (...)", Windows
-    service accounts such as "NT SERVICE\\MSExchangeAdminApiNetCore (...)" (it
+    service accounts such as "NT SERVICE\\MSExchangeAdminApiNetCore (...)", also written
+    "SERVICE\\MSExchangeAdminApiNetCore (...)" (a UPN cannot have a backslash) (it
     grants Discovery Management FullAccess on the DiscoverySearchMailbox again
     and again), the service SIDs S-1-5-18, -19, -20, and S-1-5-80-... (the SID form
     of "NT SERVICE\\<name>"; for example the service that sets up a Microsoft 365
@@ -221,7 +222,7 @@ def _is_system_actor(event: dict) -> bool:
     UserType ("DcAdmin", "System") where the Management API uses the number.
     """
     actor = str(event.get("UserId") or "").strip().upper()
-    return (actor.startswith(("NT AUTHORITY\\", "NT SERVICE\\", "S-1-5-80-")) or actor in _SERVICE_SIDS
+    return (actor.startswith(("NT AUTHORITY\\", "NT SERVICE\\", "SERVICE\\", "S-1-5-80-")) or actor in _SERVICE_SIDS
             or str(event.get("UserType")).strip().lower() in ("3", "4", "dcadmin", "system"))
 
 
