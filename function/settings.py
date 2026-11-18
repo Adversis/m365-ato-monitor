@@ -123,7 +123,7 @@ SETTINGS = (
             "The app always logs suspicious sign-ins. This controls email only.",
             "choice", choices=(("low", "All (includes VPN users)"),
                                ("medium", "Medium and high confidence"),
-                               ("high", "High confidence only (Tor, SOCKS, compromised server)"),
+                               ("high", "High confidence only (Tor, proxy, compromised server)"),
                                ("off", "None (log only)")),
             risky=("off",)),
     Setting("LOGIN_ALERT_FAILED", "signin", "Email failed sign-ins",

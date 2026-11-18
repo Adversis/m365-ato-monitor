@@ -1581,16 +1581,21 @@ def _dependency_checks() -> dict:
         checks["table_storage"] = "SKIPPED (no connection string)"
 
     try:
-        url = "https://proxycheck.io/v2/8.8.8.8?vpn=1"
+        url = "https://proxycheck.io/v3/8.8.8.8?p=1"
         if config.PROXYCHECK_API_KEY:
             url += f"&key={config.PROXYCHECK_API_KEY}"
         resp = config.http.get(url, timeout=10)
-        pc_status = resp.json().get("status") if resp.status_code == 200 else None
-        if pc_status in ("ok", "warning"):
-            msg = config.redact(resp.json().get("message", ""))[:200] if pc_status == "warning" else ""
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        pc_status = body.get("status")
+        msg = config.redact(body.get("message", ""))[:200]
+        if resp.status_code == 200 and pc_status in ("ok", "warning"):
             checks["proxycheck_io"] = f"ok (status={pc_status}{': ' + msg if msg else ''})"
-        elif resp.status_code == 200:
-            msg = config.redact(resp.json().get("message", ""))[:200]
+        elif pc_status:
+            # v3 answers "denied" with HTTP 401, 403, or 429.
             checks["proxycheck_io"] = f"FAILED: status={pc_status}: {msg}"
         else:
             checks["proxycheck_io"] = f"FAILED: HTTP {resp.status_code}"

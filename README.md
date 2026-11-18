@@ -320,6 +320,10 @@ proxycheck.io allows 100 IP lookups per day without a key, 1,000 with a free key
 
 The monitor emails you when the quota is low and again when it is used up, at most once a day for each. The Overview page shows the state. With a key, it also shows the count of lookups used today, if **Dashboard API Access** is on in the proxycheck.io dashboard.
 
+### Does a paid proxycheck.io plan help?
+
+Only if you run out of lookups. A paid plan adds lookups per day (from 10,000 for $4.99 per month). It adds no data: the free plan has the same fields and accuracy. With the free key, the monitor shows the VPN service name, the hostname, and the attacks that proxycheck.io saw from the IP. If the Overview page often shows the quota as low or used up, a paid plan helps.
+
 ### Can an MSP monitor many tenants?
 
 Yes, with one install per tenant, each in an Azure subscription of that tenant. Install each customer with `./install.ps1 -Tenant <customer domain> ...` ([Install in another tenant](#install-in-another-tenant)), see them with `-List`, and update them all with `-UpdateAll`. The alert subjects carry each customer's name. Add your ticket system or your own mailbox as an extra recipient in each installation (Settings > Email). Each customer pays for and owns their own installation and data.

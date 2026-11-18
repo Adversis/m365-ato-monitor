@@ -602,6 +602,28 @@ def _signin_sentence(user: str, result: str, where_html: str) -> str:
     return f"<strong>{_e(user)}</strong>: failed sign-in{detail} from {where_html}."
 
 
+def _attack_text(attacks) -> str:
+    """'2 login attempts, 8 vulnerability probing' from a proxycheck.io attack history."""
+    if not isinstance(attacks, dict):
+        return ""
+    parts = [f"{n} {str(k).replace('_', ' ')}{'s' if n != 1 and str(k).endswith('attempt') else ''}"
+             for k, n in sorted(attacks.items(), key=lambda kv: -kv[1]) if isinstance(n, int) and n > 0]
+    return ", ".join(parts[:4])
+
+
+def _ip_extra_facts(analysis: dict) -> list:
+    """Rows for the v3 details that exist: the VPN or proxy service, the hostname, the attacks."""
+    rows = []
+    if analysis.get("operator"):
+        rows.append(("Service", _e(analysis["operator"])))
+    if analysis.get("hostname"):
+        rows.append(("Hostname", _e(analysis["hostname"])))
+    attacks = _attack_text(analysis.get("attacks"))
+    if attacks:
+        rows.append(("Attacks seen", f"{_e(attacks)} (proxycheck.io)"))
+    return rows
+
+
 def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=None, related=None) -> bool:
     """Email one suspicious sign-in (flagged source IP).
 
@@ -619,8 +641,11 @@ def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=Non
     location = ", ".join(str(p) for p in (analysis.get("city"), analysis.get("country"))
                          if p and p != "Unknown") or "unknown"
     risk = analysis.get("risk_score", 0)
+    operator = str(analysis.get("operator") or "")
+    service = f" ({operator})" if operator else ""
 
-    where = f"<strong>{_e(ip)}</strong>, a <strong>{_e(flags)}</strong> address: {_e(network)}, {_e(location)}"
+    where = (f"<strong>{_e(ip)}</strong>, a <strong>{_e(flags)}</strong> address{_e(service)}: "
+             f"{_e(network)}, {_e(location)}")
     parts = [
         _p(_signin_sentence(raw_user, result, where)),
         _related(related),
@@ -643,6 +668,7 @@ def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=Non
             ("Time", _e(_fmt_time(event.get("CreationTime")))),
             ("Source IP", _e(ip)),
             ("IP type", _e(flags)),
+            *_ip_extra_facts(analysis),
             ("Risk score", f"{_e(risk)}/100 (proxycheck.io)"),
             ("Network", _e(network)),
             ("Location", _e(location)),

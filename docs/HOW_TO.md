@@ -369,8 +369,8 @@ A 1-minute timer seldom gives earlier alerts: Microsoft publishes audit content 
 
 1. Management UI > Settings > Suspicious sign-ins > **Which suspicious sign-ins send email**:
    - `low`: every suspicious sign-in (default). VPN users cause alerts.
-   - `medium`: VPN, hosting, Tor, SOCKS, compromised server, or risk score 66 or more.
-   - `high`: Tor, SOCKS, compromised server only.
+   - `medium`: VPN, hosting, Tor, proxy, compromised server, or risk score 66 or more.
+   - `high`: Tor, proxy, compromised server only.
    - `off`: no sign-in email.
 2. Select **Save changes**.
 

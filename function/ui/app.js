@@ -2193,7 +2193,7 @@ function ipCells(info, ip) {
   const d = info && info.ips ? info.ips[ip] : null;
   if (!d) return [h("span", { class: "muted", text: "Not looked up" }), "—"];
   if (d.note) return [h("span", { class: "muted", text: IP_NOTES[d.note] || d.note }), "—"];
-  const risk = [`Risk ${d.risk}`, d.type].filter(Boolean).join(" · ");
+  const risk = [`Risk ${d.risk}`, d.type, d.service].filter(Boolean).join(" · ");
   return [
     [[d.org, d.asn].filter(Boolean).join(" · ") || "—",
       h("span", { class: "sub" }, d.suspicious ? [pill("warn", "Flagged"), " "] : null, risk)],

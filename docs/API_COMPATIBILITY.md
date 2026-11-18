@@ -151,27 +151,41 @@ The URL comes from configuration, not from an API response. If `APP_INSIGHTS_APP
 
 ---
 
-## proxycheck.io v2
+## proxycheck.io v3
 
-IP reputation for sign-in IPs and finding IPs.
+IP reputation for sign-in IPs and finding IPs. Checked November 2026.
 
 | Property | Value |
 |---|---|
-| Endpoint | `POST https://proxycheck.io/v2/?vpn=1&asn=1&risk=1&key=<key>` with form field `ips=<a,b,c>` |
-| Key | Query string only. A POST with no query string gets a 302 redirect. |
-| Quota | 100 queries/day without a key; 1,000/day with a free key |
-| Country | `isocode` (ISO 3166 alpha-2), returned with `asn=1`. The country baseline uses it. |
+| Endpoint | `POST https://proxycheck.io/v3/?p=1&key=<key>` with form field `ips=<a,b,c>` (up to 1,000 per request) |
+| Key | Query string only. A POST to `/v3/` with no query string gets a 302 redirect to a lookup of the caller's own IP. |
+| Quota | 100 queries/day without a key, 1,000/day with a free key. Paid plans add queries only. They add no fields: "we do not gatekeep features behind our paid plans" (pricing page). |
+| Flags | None needed. v3 returns the full result. |
+
+`ip_checker.from_v3` turns each result into the v2 keys that the rest of the code reads. An answer in the v2 shape (an older cache entry) passes unchanged.
+
+| v3 field (real answers) | v2 key | Use |
+|---|---|---|
+| `detections.tor`, `compromised`, `proxy`, `vpn`, `anonymous`, `hosting` (booleans) | `type`: `TOR`, `Compromised Server`, `Proxy`, `VPN`, `Inference Engine`, `Hosting`, in this order. Else `network.type` (`Residential`, `Business`, `Wireless`) | Confidence. Tor, compromised, proxy: high. VPN, anonymous, hosting: medium |
+| any of those except `hosting` | `proxy` (`yes`/`no`) | Flags |
+| `detections.risk` (0–100) | `risk` | Risk score. Not at the top level, which the published spec says |
+| `location.country_code`, `country_name`, `city_name`, `region_name` | `isocode`, `country`, `city`, `region` | Country baseline. The spec says `isocode` |
+| `network.asn`, `provider`, `organisation`, `hostname` | the same names | Network, mutes, allowlists |
+| `operator.name` | `operator` | Alert text only ("Service") |
+| `attack_history` (counts by type, for example `login_attempt`) | `attacks` | Alert text only ("Attacks seen") |
+
+v2 calls a cloud host (Azure, AWS) a VPN with risk 66. v3 calls it hosting with risk 33. Both are medium. A comparison of 322 IPs from two tenants, and 18 public VPN, Tor, and cloud IPs, gave the same confidence in v2 and v3 for each IP. A v3 `proxy` IP is high. v2 gave high to SOCKS proxies only, and low to other proxies.
 
 Response `status`:
 
-| Status | Meaning | App action |
-|---|---|---|
-| `ok` | Results returned | Use the results |
-| `warning` | Results returned with a warning (for example within 10% of the quota) | Use the results, log the message |
-| `denied` | Quota used or key not valid | Log an error. Cache a failure for 5 minutes. |
-| `error` | No valid addresses | Log a warning |
+| Status | HTTP | Meaning | App action |
+|---|---|---|---|
+| `ok` | 200 | Results returned | Use the results |
+| `warning` | 200 | Results with a warning (for example within 10% of the quota) | Use the results, log the message |
+| `denied` | 401, 403, 429 | Quota used, key not valid, or rate limit | Log a warning. Note the quota state. Cache a failure for 5 minutes. |
+| `error` | 400 | No valid addresses | Log a warning |
 
-A per-IP object with no `proxy` field (for example `{"error": "Invalid or Internal IP Address."}`) is a failed lookup. The API leaves out some addresses (for example documentation ranges). The app treats them as failed lookups. The API returns each IP key as the client sent it, so the app sends canonical IPs.
+A per-IP object with no `detections` and no `proxy` field is a failed lookup. The API returns each IP key as the client sent it, so the app sends canonical IPs.
 
 ---
 
@@ -185,7 +199,7 @@ Checked November 2026.
 | Flex Consumption limits | The host must start within 30 seconds. A deployment to a stopped app reports success, but the app starts with no functions (Azure/Azure-Functions issue 2670). Microsoft does not document whether the platform sets `WEBSITE_AUTH_ENABLED` | `install.ps1` starts the app before it deploys. The management UI fails closed without `WEBSITE_AUTH_ENABLED` |
 | Python on Azure Functions | 3.11 support ends October 2027. 3.12 ends October 2028. Flex Consumption supports 3.10–3.14. | The tool runs on 3.12. Flex Consumption also offers 3.13 and later, so a later Python version needs no change of plan |
 | Azure CLI | `az functionapp create --flexconsumption-location` and the Flex deployment storage flags. `install.ps1` needs 2.60 or later | The script stops with "too old" and the fix `az upgrade` |
-| proxycheck.io v2 | v3 is current (June 2026). proxycheck.io supports v2 "until 2035". Limits: 100 queries per day without a key, 1,000 with a free key. | No change. A move to v3 needs a new response parser. |
+| proxycheck.io | v3 is current (stable June 2026). v2 is "Legacy", supported "until 2035". Limits: 100 queries per day without a key, 1,000 with a free key. | The tool uses v3. |
 | Application Insights query API (`/v1/apps/{appId}/query`) | Current. The `beta` path ended March 2026. `batch` ends March 2028. Entra ID authentication is required. | No change (`/v1`, single queries, Entra token). |
 | Exchange Online application access policies | Replaced by RBAC for Applications. Microsoft will announce a deprecation later. | `install.ps1 -MailSendScope mailbox` uses RBAC for Applications: a management scope with `MemberOfGroup` (direct members only), and `Test-ServicePrincipalAuthorization` to check. Microsoft: changes apply in 30 minutes to 2 hours (cache). |
 

@@ -403,7 +403,8 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
     if cache_hits > 0:
         logging.info(f"IP cache: {cache_hits} hits, {len(uncached)} to check via API")
 
-    url = "https://proxycheck.io/v2/?vpn=1&asn=1&risk=1"
+    # v3 needs a query string: a POST to a bare /v3/ redirects to a lookup of the caller's own IP.
+    url = "https://proxycheck.io/v3/?p=1"
     if config.PROXYCHECK_API_KEY:
         url += f"&key={config.PROXYCHECK_API_KEY}"
 
@@ -419,13 +420,16 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
         return results
 
     if response.status_code != 200:
-        logging.warning(f"proxycheck.io batch returned HTTP {response.status_code}")
+        # v3 answers "denied" with HTTP 401, 403, or 429 and "error" with HTTP 400.
+        msg = ""
         try:
             body = response.json()
             if isinstance(body, dict):
+                msg = config.redact(body.get("message", ""))
                 proxycheck_quota.note(table_client, body.get("status", ""), body.get("message", ""))
         except Exception:
             pass
+        logging.warning(f"proxycheck.io batch returned HTTP {response.status_code}{': ' + msg if msg else ''}")
         for ip in uncached:
             cache_ip_negative(ip, table_client)
         return results
@@ -455,7 +459,7 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
             logging.warning(f"proxycheck.io batch returned status={status}: {msg}")
 
     for ip in uncached:
-        ip_data = data.get(ip)
+        ip_data = from_v3(data.get(ip))
         if isinstance(ip_data, dict) and "proxy" in ip_data:
             results[ip] = ip_data
             cache_ip_result(ip, ip_data, table_client)
@@ -463,6 +467,62 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
             cache_ip_negative(ip, table_client)
 
     return results
+
+
+def from_v3(result):
+    """A proxycheck.io v3 result in the v2 shape that the rest of the code reads.
+
+    The cache, private_relay, geo_monitor, and analyze_ip read v2 keys (proxy, type, risk,
+    isocode, organisation). v3 has booleans per detection and nested sections. The type
+    order keeps the v2 confidence: Tor, compromised, and proxy are high; VPN, an anonymous
+    IP with no category (v2 "Inference Engine"), and hosting are medium. A v2 answer (an old
+    cache entry, a test) is returned unchanged. The key names come from real answers: the
+    published spec differs (risk is in detections; location has country_code, city_name).
+    """
+    if not isinstance(result, dict) or "detections" not in result:
+        return result
+    d = result.get("detections") if isinstance(result.get("detections"), dict) else {}
+    net = result.get("network") if isinstance(result.get("network"), dict) else {}
+    loc = result.get("location") if isinstance(result.get("location"), dict) else {}
+    op = result.get("operator") if isinstance(result.get("operator"), dict) else {}
+    if d.get("tor"):
+        ip_type = "TOR"
+    elif d.get("compromised"):
+        ip_type = "Compromised Server"
+    elif d.get("proxy"):
+        ip_type = "Proxy"
+    elif d.get("vpn"):
+        ip_type = "VPN"
+    elif d.get("anonymous"):
+        ip_type = "Inference Engine"
+    elif d.get("hosting"):
+        ip_type = "Hosting"
+    else:
+        ip_type = net.get("type") or ""
+    anonymous = any(d.get(k) for k in ("anonymous", "proxy", "vpn", "tor", "compromised"))
+    attacks = result.get("attack_history")
+    attacks = {str(k): v for k, v in attacks.items() if isinstance(v, int) and v > 0} \
+        if isinstance(attacks, dict) else {}
+    out = {
+        "proxy": "yes" if anonymous else "no",
+        "type": ip_type,
+        "risk": d.get("risk") if isinstance(d.get("risk"), int) else 0,
+        "asn": net.get("asn") or "",
+        "range": net.get("range") or "",
+        "hostname": net.get("hostname") or "",
+        "provider": net.get("provider") or "",
+        "organisation": net.get("organisation") or "",
+        "network_type": net.get("type") or "",
+        "isocode": loc.get("country_code") or loc.get("isocode") or "",
+        "country": loc.get("country_name") or loc.get("country") or "",
+        "region": loc.get("region_name") or loc.get("region") or "",
+        "city": loc.get("city_name") or loc.get("city") or "",
+        "operator": str(op.get("name") or ""),
+        "attacks": attacks,
+        "last_seen": d.get("last_seen") or "",
+        "api": 3,
+    }
+    return out
 
 
 # -----------------------------------------------------------------------------
@@ -515,4 +575,8 @@ def analyze_ip(ip_data: dict) -> dict:
         "city": ip_data.get("city", "Unknown"),
         "region": ip_data.get("region", "Unknown"),
         "country": ip_data.get("country", "Unknown"),
+        # v3 only (empty for a v2 cache entry): for the alert text, not for the verdict.
+        "hostname": str(ip_data.get("hostname") or ""),
+        "operator": str(ip_data.get("operator") or ""),
+        "attacks": ip_data.get("attacks") if isinstance(ip_data.get("attacks"), dict) else {},
     }

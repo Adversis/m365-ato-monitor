@@ -191,15 +191,15 @@ MAX_CATCHUP_MINUTES = DEDUP_WINDOW_MINUTES
 # Log a warning if one audit_log_monitor run takes longer than this.
 RUN_DURATION_WARN_SECONDS = 60
 
-HIGH_CONFIDENCE_TYPES = {"TOR", "SOCKS", "SOCKS4", "SOCKS5", "Compromised Server"}
+HIGH_CONFIDENCE_TYPES = {"TOR", "Proxy", "SOCKS", "SOCKS4", "SOCKS5", "Compromised Server"}  # Proxy: v3; SOCKS: v2 cache
 MEDIUM_CONFIDENCE_TYPES = {"VPN", "Inference Engine", "Hosting"}
 SUSPICIOUS_NETWORK_TYPES = {"Hosting"}
 
 # Minimum confidence of a suspicious login that sends an email. The app always
 # logs suspicious logins to App Insights.
 #   low    - every suspicious login (default)
-#   medium - VPN, hosting, Tor, SOCKS, compromised server, or risk >= 66
-#   high   - Tor, SOCKS, compromised server only
+#   medium - VPN, hosting, Tor, proxy, compromised server, or risk >= 66
+#   high   - Tor, proxy, compromised server only
 #   off    - no login emails
 _CONFIDENCE_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3}
 _CONFIDENCE_OFF = ("off", "none", "disabled", "never")

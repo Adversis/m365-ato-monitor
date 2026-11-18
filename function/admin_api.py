@@ -817,7 +817,8 @@ def _ip_details(data: dict) -> dict:
         return "" if value.lower() == "unknown" else value[:limit]
     return {"org": text(a["org"]), "asn": text(a["asn"], 20), "type": text(a["proxy_type"], 30),
             "risk": a["risk_score"], "flags": [text(f, 20) for f in a["flags"]][:4],
-            "suspicious": a["is_suspicious"], "city": text(a["city"], 60), "country": text(a["country"], 60)}
+            "suspicious": a["is_suspicious"], "city": text(a["city"], 60), "country": text(a["country"], 60),
+            "service": text(a["operator"], 60)}
 
 
 def _search_ips(rows: list) -> dict:
