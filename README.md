@@ -221,10 +221,10 @@ Sign-in uses Entra ID. The person who runs the install can open the page. To giv
 
 | Page | What it shows |
 | --- | --- |
-| **Overview** | The health of the monitor, the alerts of the last 7 days, and tools: test alerts and the onboarding scan |
+| **Overview** | The health of the monitor, the alerts of the last 7 days, failed sign-ins of the last 7 days (password spraying, no alerts), and tools: test alerts and the onboarding scan |
 | **Alerts** | Each alert of the last 90 days, and what happened to it |
 | **Users** | One user's alerts, inbox rules, countries, and audit log. Buttons to revoke sessions, block sign-in, or turn off an inbox rule |
-| **Mutes** | Stop email for an expected medium alert for some days. High alerts are always sent |
+| **Mutes** | Stop email for an expected medium alert for some days. A mute hides a high alert only if it names one alert type, one user, and one network |
 | **Settings** | Alert mailbox and recipients, a webhook for Slack or Teams, allowlists, detection options, the automatic response, the proxycheck.io key, and who can open the management UI |
 | **Countries** | The approved countries of each user. Approve a country before a user travels |
 | **History** | Each change and action made in the management UI, and who made it |

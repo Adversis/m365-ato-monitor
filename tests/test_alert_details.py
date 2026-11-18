@@ -124,7 +124,9 @@ class TestNetworkMute:
         assert match("mail_access", USER, "", "medium", NOW, asn="AS63023")["id"] == mute["id"]
         assert match("mail_access", USER, "", "medium", NOW, asn="AS9009") is None
         assert match("mail_access", USER, "", "medium", NOW) is None           # unknown network: not muted
-        assert match("mail_access", USER, "", "high", NOW, asn="AS63023") is None
+        # One type, one user, one network: the mute hides high alerts too (admin_store.hides_high).
+        assert match("mail_access", USER, "", "high", NOW, asn="AS63023")["id"] == mute["id"]
+        assert match("mail_access", USER, "", "high", NOW, asn="AS9009") is None
         assert match("mail_access", USER, "", "medium", NOW + timedelta(days=364), asn="63023")
         assert "network GTHost (AS63023)" in admin_store.describe_mute(mute)
 

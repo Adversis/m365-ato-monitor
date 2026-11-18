@@ -64,9 +64,16 @@ def test_same_confidence_as_v2(name, v2, v3):
 
 
 @pytest.mark.parametrize("net", ["Residential", "Wireless", "Hosting", "Business"])
-def test_proxy_is_high_on_any_network(net):
+def test_proxy_is_medium_and_high_with_attacks(net):
     a = ip_checker.analyze_ip(ip_checker.from_v3(_v3(proxy=True, anonymous=True, risk=100, net=net)))
-    assert a["confidence"] == "high" and a["is_suspicious"]
+    assert a["confidence"] == "medium" and a["is_suspicious"]
+    a = ip_checker.analyze_ip(ip_checker.from_v3(_v3(proxy=True, anonymous=True, risk=100, net=net,
+                                                     attacks={"login_attempt": 1})))
+    assert a["confidence"] == "high"
+    # Attacks do not raise a VPN or a hosting IP: only a proxy.
+    a = ip_checker.analyze_ip(ip_checker.from_v3(_v3(vpn=True, anonymous=True, risk=50, net=net,
+                                                     attacks={"login_attempt": 3})))
+    assert a["confidence"] == "medium"
 
 
 def test_adapter_fields():

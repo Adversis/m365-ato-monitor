@@ -166,7 +166,7 @@ IP reputation for sign-in IPs and finding IPs. Checked November 2026.
 
 | v3 field (real answers) | v2 key | Use |
 |---|---|---|
-| `detections.tor`, `compromised`, `proxy`, `vpn`, `anonymous`, `hosting` (booleans) | `type`: `TOR`, `Compromised Server`, `Proxy`, `VPN`, `Inference Engine`, `Hosting`, in this order. Else `network.type` (`Residential`, `Business`, `Wireless`) | Confidence. Tor, compromised, proxy: high. VPN, anonymous, hosting: medium |
+| `detections.tor`, `compromised`, `proxy`, `vpn`, `anonymous`, `hosting` (booleans) | `type`: `TOR`, `Compromised Server`, `Proxy`, `VPN`, `Inference Engine`, `Hosting`, in this order. Else `network.type` (`Residential`, `Business`, `Wireless`) | Confidence. Tor, compromised: high. Proxy: medium, or high with attacks in `attack_history`. VPN, anonymous, hosting: medium |
 | any of those except `hosting` | `proxy` (`yes`/`no`) | Flags |
 | `detections.risk` (0–100) | `risk` | Risk score. Not at the top level, which the published spec says |
 | `location.country_code`, `country_name`, `city_name`, `region_name` | `isocode`, `country`, `city`, `region` | Country baseline. The spec says `isocode` |
@@ -174,7 +174,7 @@ IP reputation for sign-in IPs and finding IPs. Checked November 2026.
 | `operator.name` | `operator` | Alert text only ("Service") |
 | `attack_history` (counts by type, for example `login_attempt`) | `attacks` | Alert text only ("Attacks seen") |
 
-v2 calls a cloud host (Azure, AWS) a VPN with risk 66. v3 calls it hosting with risk 33. Both are medium. A comparison of 322 IPs from two tenants, and 18 public VPN, Tor, and cloud IPs, gave the same confidence in v2 and v3 for each IP. A v3 `proxy` IP is high. v2 gave high to SOCKS proxies only, and low to other proxies.
+v2 calls a cloud host (Azure, AWS) a VPN with risk 66. v3 calls it hosting with risk 33. Both are medium. A comparison of 322 IPs from two tenants, and 18 public VPN, Tor, and cloud IPs, gave the same confidence in v2 and v3 for each IP. A v3 `proxy` IP is medium, and high if `attack_history` has attacks. v2 gave high to SOCKS proxies only, and low to other proxies. v3 does not say which kind of proxy.
 
 Response `status`:
 

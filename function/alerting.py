@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from urllib.parse import quote
 
 import admin_store
@@ -134,6 +135,44 @@ def _fmt_time(raw) -> str:
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _age_text(raw, now: Optional[datetime] = None) -> str:
+    """'47 minutes' between an audit time (UTC) and ``now``, or "" if unknown or in the future."""
+    try:
+        dt = datetime.fromisoformat(str(raw or "").strip().replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    minutes = int(((now or datetime.now(timezone.utc)) - dt).total_seconds() // 60)
+    if minutes < 0:
+        return ""
+    if minutes < 1:
+        return "less than 1 minute"
+    if minutes < 120:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    if minutes < 48 * 60:
+        return f"{minutes // 60} hours {minutes % 60} minutes"
+    return f"{minutes // 1440} days"
+
+
+def _time_value(raw) -> str:
+    """The Time row: the event time, and how long before this alert it was (Microsoft's delay)."""
+    age = _age_text(raw)
+    return _e(_fmt_time(raw)) + (f" ({_e(age)} before this alert)" if age else "")
+
+
+def _session_note(event: dict) -> str:
+    """For a successful sign-in: how long the session has existed. "" otherwise."""
+    if str(event.get("Operation", "")) != "UserLoggedIn":
+        return ""
+    age = _age_text(event.get("CreationTime"))
+    if not age:
+        return ""
+    return _p(f"If this sign-in is not the user, the attacker has had a session for <strong>{_e(age)}</strong>. "
+              "A revoke takes effect in up to 15 minutes in apps that support continuous access evaluation, "
+              "and up to 90 minutes in other apps.")
 
 
 def _describe_result(result: str) -> str:
@@ -382,13 +421,17 @@ def _related(rows) -> str:
 
 def _respond_links(user: str, ftype: str, severity: str, rule_name: str = "", asn: str = "",
                    network: str = "") -> str:
-    """Links to the user page (manual response) and, for medium alerts, to a prefilled mute."""
+    """Links to the user page (manual response) and to a prefilled mute.
+
+    The mute link is for medium alerts, and for a high alert with a network (a mute of one
+    type, one user, and one network hides high alerts too: admin_store.hides_high).
+    """
     page = ui_link("user", user) if "@" in str(user) else ""
     if not page:
         return ""
     text = (f"In the {_link(page, 'management UI')}, you can see the user's alerts, revoke sessions, "
             "block sign-in, and turn off inbox rules.")
-    if severity != "high" and ftype:
+    if ftype and (severity != "high" or config.normalize_asn(asn)):
         mute = ui_link("mute", ftype, user, rule_name, config.normalize_asn(asn), network if asn else "")
         text += (f" If this alert is expected, {_link(mute, 'mute similar alerts')} for a set number of days.")
     return _p(text, muted=True)
@@ -551,7 +594,7 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
         if value and value.lower() != raw_user.lower():
             facts.append((label, _e(value)))
     facts += [
-        ("Time", _e(_fmt_time(event.get("CreationTime")))),
+        ("Time", _time_value(event.get("CreationTime"))),
         ("Operation", _e(event.get("Operation", ""))),
         ("Source IP", _e(ip or "not in the record")),
         ("Audit record ID", _e(event.get("Id", ""))),
@@ -648,6 +691,7 @@ def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=Non
              f"{_e(network)}, {_e(location)}")
     parts = [
         _p(_signin_sentence(raw_user, result, where)),
+        _session_note(event),
         _related(related),
         _notice("info", "Many alerts like this are legitimate VPN use. If this IP is a known corporate "
                         "VPN or office, add it to " + (
@@ -665,7 +709,7 @@ def send_suspicious_login_alert(event: dict, ip: str, analysis: dict, outbox=Non
         _facts([
             ("User", _e(raw_user)),
             ("Result", _e(_describe_result(result))),
-            ("Time", _e(_fmt_time(event.get("CreationTime")))),
+            ("Time", _time_value(event.get("CreationTime"))),
             ("Source IP", _e(ip)),
             ("IP type", _e(flags)),
             *_ip_extra_facts(analysis),
@@ -729,6 +773,7 @@ def send_country_anomaly_alert(anomaly: dict, action_result: str, outbox=None, r
     parts = [
         _p(_signin_sentence(raw_user, result, where)),
         _p(f"This user usually signs in from: <strong>{_e(usual)}</strong>."),
+        _session_note(event),
         _response_notice(action_result),
         _related(related),
         _heading("If you do not recognize this sign-in"),
@@ -758,7 +803,7 @@ def send_country_anomaly_alert(anomaly: dict, action_result: str, outbox=None, r
         _facts([
             ("User", _e(raw_user)),
             ("Result", _e(_describe_result(result))),
-            ("Time", _e(_fmt_time(event.get("CreationTime")))),
+            ("Time", _time_value(event.get("CreationTime"))),
             ("Country", _e(country)),
             ("Usual countries", _e(usual)),
             ("Source IP", _e(ip)),

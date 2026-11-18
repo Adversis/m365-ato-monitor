@@ -23,6 +23,7 @@ import admin_store
 import config
 import geo_monitor
 import journal
+import failed_signins
 import mail_access
 import network_backfill
 import responder
@@ -453,6 +454,8 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
     alerted = {}         # suspicious sign-in alerts of this run (user, IP, outcome, day) -> journal row
     observations = []  # country baseline input: sign-ins from IPs that are not flagged
     clean_events = []
+    failures = {}      # event key -> failed sign-in for the Overview (failed_signins.py), flagged or not
+    marked = set()     # event keys marked processed in this call: only these count
     failed = False
 
     for event, event_key, ip, queued_at in pending:
@@ -464,6 +467,7 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
             continue
 
         analysis = analyze_ip(ip_data)
+        failures[event_key] = failed_signins.entry(event, ip, analysis)
         if not analysis["is_suspicious"]:
             observations.append({
                 "user": event.get("UserId", ""), "country": geo_monitor.country_of(ip_data),
@@ -486,6 +490,7 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
 
         if done and events_table:
             mark_event_processed(event_key, events_table)
+            marked.add(event_key)
             if queued_at is not None:
                 delete_pending_ip(events_table, event_key)
 
@@ -502,8 +507,11 @@ def _run_login_check(events_table, ip_cache_table, processed_keys: set, login_ev
     for event_key, queued_at in clean_events:
         if events_table:
             mark_event_processed(event_key, events_table)
+            marked.add(event_key)
             if queued_at is not None:
                 delete_pending_ip(events_table, event_key)
+    # After the marks: a record that a later run checks again is not counted twice.
+    failed_signins.record(events_table, [e for k, e in failures.items() if k in marked])
     if failed:
         raise RuntimeError("Sign-in checks remain neither delivered nor queued")
 
@@ -1633,6 +1641,7 @@ def _runtime_state(events_table, now: datetime, ip_cache_table=None) -> dict:
         "queues": queues,
         "country_baseline": geo_monitor.status(geo_monitor.table_client(), now) if events_table else None,
         "mail_access": mail_access.summary(events_table, now),
+        "failed_signins": failed_signins.summary(events_table, now),
         "ip_lookups": proxycheck_quota.status(ip_cache_table, now),
         "update": updates.status(events_table),
         "network_backfill": network_backfill.summary(events_table),

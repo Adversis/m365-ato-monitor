@@ -86,11 +86,11 @@ A mute stops email for medium alerts that match it, for 1 to 3650 days. Use it f
 
 What a mute does not hide:
 
-- High alerts. They are always sent.
+- High alerts, unless the mute names one alert type, one user, and one network (ASN). For example: one user who always signs in through a known proxy. For a network that you trust for all users, use Allowed networks (ASNs) in Settings instead.
 - OAuth consent, attack tool, legacy authentication, and audit-off alerts. They are always high.
 - New-country alerts (always high). To stop them for a traveler, approve the country (Management UI > Countries).
 
-A muted alert is not lost. It is recorded on the user page (Management UI > Users) with the status "muted", and the weekly report counts it. The automatic response does not run for a muted alert (it runs for high alerts only). To end a mute early, select **End now** in Management UI > Mutes.
+A muted alert is not lost. It is recorded on the user page (Management UI > Users) with the status "muted", and the weekly report counts it. The automatic response does not run for a muted alert. To end a mute early, select **End now** in Management UI > Mutes.
 
 ---
 
@@ -369,8 +369,8 @@ A 1-minute timer seldom gives earlier alerts: Microsoft publishes audit content 
 
 1. Management UI > Settings > Suspicious sign-ins > **Which suspicious sign-ins send email**:
    - `low`: every suspicious sign-in (default). VPN users cause alerts.
-   - `medium`: VPN, hosting, Tor, proxy, compromised server, or risk score 66 or more.
-   - `high`: Tor, proxy, compromised server only.
+   - `medium`: VPN, proxy, hosting, Tor, compromised server, or risk score 66 or more.
+   - `high`: Tor, compromised server, or a proxy with recorded attacks only.
    - `off`: no sign-in email.
 2. Select **Save changes**.
 

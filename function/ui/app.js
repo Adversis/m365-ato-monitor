@@ -670,6 +670,39 @@ function countriesCard() {
     facts(rows));
 }
 
+// Failed sign-ins of the last 7 days (failed_signins.py): password spraying. Not alerted.
+const FAILED_CODES = { 50126: "wrong password", 50053: "locked", 50034: "no such account", 50057: "disabled" };
+
+function failedSigninsCard() {
+  const f = (state.health || {}).failed_signins;
+  let rows;
+  if (!f) {
+    rows = [["State", "unknown"]];
+  } else if (!f.total) {
+    rows = [["Last 7 days", "No failed sign-ins"]];
+  } else {
+    const codes = Object.entries(f.codes || {}).sort((a, b) => b[1] - a[1])
+      .map(([c, n]) => `${FAILED_CODES[c] || c} ${n}`).join(", ");
+    const n = (x, word) => `${x.toLocaleString()} ${word}${x === 1 ? "" : "s"}`;
+    const more = (x, word, full) => full ? `${x.toLocaleString()}+ ${word}s` : n(x, word);
+    rows = [
+      ["Last 7 days", `${n(f.total, "failure")}: ${more(f.users, "account", f.users_more)}, ${more(f.ips, "IP", f.ips_more)}`, sub(codes)],
+      ["From flagged IPs", f.flagged ? `${f.flagged.toLocaleString()} (VPN, proxy, hosting, Tor)` : "none"],
+      ["Most targeted", h("ul", { class: "plain-list" }, (f.top_users || []).slice(0, 3).map((u) => h("li", {},
+        userLink(u.user), sub(`${u.n} from ${more(u.ips, "IP", u.ips >= 10)}, last ${ago(u.last + "Z")}`))))],
+      ["Source networks", h("ul", { class: "plain-list" }, (f.top_nets || []).slice(0, 3).map((x) => h("li", {},
+        x.name || x.asn || "Unknown network", x.flagged ? [" ", pill("warn", "Flagged")] : null,
+        sub(`${x.n} on ${more(x.users, "account", x.users >= 8)}${x.asn && x.asn !== "unknown" && x.name ? ", " + x.asn : ""}`))))],
+      ["Per day", sub((f.per_day || []).map((d) => d.n).join(" · ") + " (oldest first)")],
+    ];
+  }
+  return h("section", { class: "card", "aria-labelledby": "card-failed" },
+    h("div", { class: "card-head" }, h("h2", { id: "card-failed", text: "Failed sign-ins" })),
+    facts(rows),
+    h("p", { class: "card-note", text: "These sign-ins failed. This card sends no alerts. One account from many " +
+      "IPs, or many accounts from one network, is password spraying. Make sure that these accounts have MFA." }));
+}
+
 function addressList(list) {
   return list && list.length ? h("span", { class: "chips" }, list.map((a) => h("span", { class: "chip", text: a }))) : "none";
 }
@@ -943,7 +976,7 @@ function renderOverview() {
     h("div", { class: "stack" },
       statusSummary(),
       alertsCard(),
-      h("div", { class: "grid" }, monitorCard(), countriesCard(), accessCard()),
+      h("div", { class: "grid" }, monitorCard(), countriesCard(), failedSigninsCard(), accessCard()),
       emailsCard()),
     h("h2", { class: "section-title", text: "Tools" }),
     h("div", { class: "stack" }, testAlertsCard(), checksCard(), scanCard()));
@@ -1627,12 +1660,12 @@ function auditRecord(r) {
   return box;
 }
 
-// Links under an alert: mute similar alerts (medium alerts of a type that a mute can hide; high
-// alerts always send email), and the user page, where revoke, block, and the inbox rules are.
+// Links under an alert: mute similar alerts (a type that a mute can hide; a high alert only with a
+// network, see hidesHigh), and the user page, where revoke, block, and the inbox rules are.
 function alertActions(r, withUser) {
   const person = r.user && r.user.includes("@");
   const links = [];
-  if (person && r.severity !== "high" && muteTypes().some(([t]) => t === r.type)) {
+  if (person && (r.severity !== "high" || r.asn) && muteTypes().some(([t]) => t === r.type)) {
     const href = (asn, network) => {
       const parts = [r.type, r.user, r.type === "inbox_rule" ? r.rule_name || "" : "", asn || "", asn ? network || "" : ""];
       while (parts.length > 2 && !parts[parts.length - 1]) parts.pop();
@@ -2400,7 +2433,12 @@ let muteHint = "";         // shown when the next deep link opens the form
 
 function describeMute(m) {
   return [muteTypeLabel(m.type), m.user === "*" ? "all users" : m.user, m.rule_name ? `rule "${m.rule_name}"` : null,
-    m.asn ? `network ${networkLabel(m)}` : null].filter(Boolean).join(", ");
+    m.asn ? `network ${networkLabel(m)}` : null, hidesHigh(m) ? "also high alerts" : null].filter(Boolean).join(", ");
+}
+
+// The same rule as admin_store.hides_high: one alert type, one user, and one network.
+function hidesHigh(m) {
+  return !!(m.type && m.type !== "*" && m.user && m.user !== "*" && m.asn);
 }
 
 function networkLabel(m) {
@@ -2513,7 +2551,7 @@ function muteFormCard() {
     h("h2", { id: "mute-form-title", text: "Add a mute" }),
     h("p", { class: "card-sub", text: "Select one alert type, one user, or both. Optional: one network (ASN)." }),
     h("form", { id: "mute-form", class: "form-grid", onsubmit: addMute },
-      formField("mute-type", "Alert type", typeSelect, "Only types that can be medium. High alerts always send email.", muteErrors.type),
+      formField("mute-type", "Alert type", typeSelect, "Only types that can be medium. High alerts send email, unless the mute names one alert type, one user, and one network.", muteErrors.type),
       formField("mute-user", "User", input("mute-user", "user", { type: "text", inputmode: "email", placeholder: "jane@contoso.com or *" }),
         "A user principal name, or * for all users.", muteErrors.user),
       ruleField,
@@ -2572,7 +2610,7 @@ function renderMutes() {
   fill(root,
     h("div", { class: "page-head" },
       h("h1", { text: "Mutes" }),
-      h("p", { class: "lead", text: `A mute stops email for medium alerts of one alert type, one user, one inbox rule, or one network, for 1 to ${maxMuteDays()} days. High alerts always send email.` }),
+      h("p", { class: "lead", text: `A mute stops email for medium alerts of one alert type, one user, one inbox rule, or one network, for 1 to ${maxMuteDays()} days. High alerts send email, unless the mute names one alert type, one user, and one network. For a network that you trust for all users, use Allowed networks (ASNs) in Settings.` }),
       h("p", { class: "lead", text: "Muted alerts are still recorded. You see them on the user page and in Alerts. Each change is recorded in History and emailed to the alert mailbox." })),
     h("div", { class: "stack" },
       h("div", { id: "mute-out", "aria-live": "polite" },
@@ -2606,14 +2644,17 @@ async function addMute(e) {
   const untilDate = Number.isInteger(days) ? utc(new Date(Date.now() + days * 86400000).toISOString()) : "";
   const ok = await confirmDialog({
     title: "Add mute",
-    body: [h("p", { text: "Stop email for medium alerts that match:" }),
+    body: [h("p", { text: hidesHigh(body) ? "Stop email for medium and high alerts that match:" : "Stop email for medium alerts that match:" }),
       h("ul", {},
         h("li", { text: `Alert type: ${muteTypeLabel(body.type)}` }),
         h("li", { text: `User: ${body.user === "*" ? "all users" : body.user}` }),
         body.rule_name ? h("li", { text: `Rule: ${body.rule_name}` }) : null,
         body.asn ? h("li", { text: `Network: ${networkLabel(body)}` }) : null,
         h("li", { text: `For: ${plural(days || 0, "day")}${untilDate ? ` (until about ${untilDate})` : ""}` })),
-      h("p", { class: "muted small", text: "High alerts still send email. Muted alerts are still recorded. The change is recorded in History and emailed to the alert mailbox." })],
+      h("p", { class: "muted small", text: (hidesHigh(body)
+        ? "High alerts are hidden too, and get no automatic response. "
+        : "High alerts still send email. To hide them too, name one alert type, one user, and one network. ") +
+        "Muted alerts are still recorded. The change is recorded in History and emailed to the alert mailbox." })],
     ok: "Add mute", danger: true });
   if (!ok) return;
   setBusy(button, true);
@@ -2668,13 +2709,13 @@ async function endMute(e, m) {
         h("li", { text: `User: ${m.user === "*" ? "all users" : m.user}` }),
         m.rule_name ? h("li", { text: `Rule: ${m.rule_name}` }) : null,
         h("li", { text: `Reason: ${m.reason}` })),
-      h("p", { class: "muted small", text: "Medium alerts of this kind send email again from the next run. The change is recorded in History and emailed to the alert mailbox." })],
+      h("p", { class: "muted small", text: "Alerts of this kind send email again from the next run. The change is recorded in History and emailed to the alert mailbox." })],
     ok: "End mute", danger: false });
   if (!ok) return;
   setBusy(button, true);
   try {
     muteData = await api("/mutes", { method: "POST", body: { action: "end", id: m.id } });
-    muteNotice = { ok: true, text: `Mute ended: ${describeMute(m)}. Medium alerts of this kind send email again from the next run.` };
+    muteNotice = { ok: true, text: `Mute ended: ${describeMute(m)}. Alerts of this kind send email again from the next run.` };
     toast("Mute ended.");
     reload(false);
   } catch (err) {

@@ -519,7 +519,6 @@ def from_v3(result):
         "city": loc.get("city_name") or loc.get("city") or "",
         "operator": str(op.get("name") or ""),
         "attacks": attacks,
-        "last_seen": d.get("last_seen") or "",
         "api": 3,
     }
     return out
@@ -551,9 +550,12 @@ def analyze_ip(ip_data: dict) -> dict:
     if allowed_asn:
         flagged = []
 
+    # A proxy that proxycheck.io saw attacking (login attempts, probing) is known bad.
+    attacked = proxy_type == "Proxy" and isinstance(ip_data.get("attacks"), dict) and any(
+        isinstance(n, int) and n > 0 for n in ip_data["attacks"].values())
     if allowed_asn:
         confidence = "none"
-    elif proxy_type in config.HIGH_CONFIDENCE_TYPES:
+    elif proxy_type in config.HIGH_CONFIDENCE_TYPES or attacked:
         confidence = "high"
     elif proxy_type in config.MEDIUM_CONFIDENCE_TYPES or risk_score >= 66:
         confidence = "medium"

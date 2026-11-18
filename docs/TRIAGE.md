@@ -168,7 +168,7 @@ Subject: `[M365 Alert] <LOW|MEDIUM|HIGH>: Suspicious sign-in - <user> from <IP>,
 
 **If benign.** For a company VPN or office with fixed IPs, add the IPs to **Allowed IPs and ranges**. For a mobile carrier, add its ASN to **Allowed networks (ASNs)**. If you get too many emails, use digest mode or change **Which suspicious sign-ins send email**. Each option hides something: see [Options for expected alerts](#options-for-expected-alerts).
 
-**Severity.** The badge shows the IP confidence, not the result. High: Tor, proxy, compromised server. Medium: VPN, hosting, inference engine, or risk 66 or more. Low: risk at or above the threshold. A `success` or `correct password` result needs action at each level.
+**Severity.** The badge shows the IP confidence, not the result. High: Tor, compromised server, or a proxy with recorded attacks. Medium: VPN, other proxy, hosting, inference engine, or risk 66 or more. Low: risk at or above the threshold. A `success` or `correct password` result needs action at each level.
 
 **How often.** One sign-in writes several audit records, seconds apart (one for each app). The monitor sends one alert for each user, IP, and result (success or failure) in a UTC day. A success after failures from the same IP sends a second alert. Some records have the user "Not Available": the monitor takes the user from another record of the same sign-in session, or from the record's actor.
 
@@ -218,7 +218,7 @@ Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used
 
 **If benign.** Add fixed company VPN or proxy IPs to **Allowed IPs and ranges**: the session check ignores them. Approving a country for the user makes the alert medium. It does not stop it.
 
-**Severity.** Two countries: high, or medium if the new country is a home country or usual for the user. One alert per session and country. Same country, risky IP: medium, or high for a Tor, proxy, or compromised-server IP. One alert per session. A sign-in from the risky IP gives a suspicious sign-in alert instead. Mail reads and sends from the risky IP give a [`mail_access`](#mail_access) alert instead, unless that check is off.
+**Severity.** Two countries: high, or medium if the new country is a home country or usual for the user. One alert per session and country. Same country, risky IP: medium, or high for a Tor or compromised-server IP, or a proxy with recorded attacks. One alert per session. A sign-in from the risky IP gives a suspicious sign-in alert instead. Mail reads and sends from the risky IP give a [`mail_access`](#mail_access) alert instead, unless that check is off.
 
 <a id="mail_access"></a>
 ## mail_access — Mail access from a risky IP
@@ -627,7 +627,7 @@ Use the narrowest option. Most expected alerts are one-time events: confirm them
 | Option | Where | What it hides | What still alerts |
 |---|---|---|---|
 | Confirm and change nothing | — | Nothing | All alerts. Best for a one-time event (a consent, a role, a domain) |
-| A mute | Management UI > Mutes, or the link "mute similar alerts" in a medium alert email | Email for medium alerts that match the mute: one alert type, one user, one inbox rule, one network (ASN), or a combination, for 1 to 3650 days. Muted alerts are still recorded on the user page and counted in the weekly report | High alerts. OAuth consent, attack tool, legacy authentication, and audit-off alerts are always high and cannot be muted. Make each mute as narrow and as short as possible |
+| A mute | Management UI > Mutes, or the link "mute similar alerts" in an alert email | Email for medium alerts that match the mute: one alert type, one user, one inbox rule, one network (ASN), or a combination, for 1 to 3650 days. Muted alerts are still recorded on the user page and counted in the weekly report | High alerts, unless the mute names one alert type, one user, and one network. OAuth consent, attack tool, legacy authentication, and audit-off alerts cannot be muted. Make each mute as narrow and as short as possible |
 | Approve a country for a user | Management UI > Countries, or the link in the new-country email | New-country alerts for that user and country. Compromise alerts from that country are not raised to high for the user. Session alerts there become medium | Other users, other countries |
 | **Home countries** (`HOME_COUNTRIES`) | Settings > New sign-in countries | The same as an approval, for all users | Other countries |
 | **Allowed IPs and ranges** (`ALLOWED_IPS`) | Settings > Allowlists | Suspicious sign-in, new-country, and session alerts from those IPs. Compromise alerts from them are not raised to high | Compromise alerts from those IPs |

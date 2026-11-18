@@ -220,12 +220,30 @@ class TestMutes:
         assert match("inbox_rule", "JANE@contoso.com", "news", "medium", NOW)["id"] == mute["id"]
         assert match("inbox_rule", "jane@contoso.com", "Other", "medium", NOW) is None
         assert match("inbox_rule", "bob@contoso.com", "News", "medium", NOW) is None
-        assert match("inbox_rule", "jane@contoso.com", "News", "high", NOW) is None    # high is never muted
+        assert match("inbox_rule", "jane@contoso.com", "News", "high", NOW) is None    # no network: high is not muted
         assert match("inbox_rule", "jane@contoso.com", "News", "medium", NOW + timedelta(days=8)) is None
         assert admin_store.end_mute(table, mute["id"], "admin@contoso.com", NOW + timedelta(hours=1))
         assert match("inbox_rule", "jane@contoso.com", "News", "medium", NOW + timedelta(hours=2)) is None
         rows = admin_store.list_mutes(table, NOW + timedelta(hours=2), include_expired=True)
         assert rows[0]["ended_by"] == "admin@contoso.com" and not rows[0]["active"]
+
+    def test_high_alert_needs_type_user_and_network(self):
+        table = FakeTable()
+        match = admin_store.matching_mute
+        scoped = admin_store.add_mute(table, _mute(type="session_reuse", asn="AS64500", days=400),
+                                      "admin@contoso.com", NOW)
+        assert scoped["hides_high"]
+        assert match("session_reuse", "jane@contoso.com", "", "high", NOW, asn="AS64500")["id"] == scoped["id"]
+        assert match("session_reuse", "jane@contoso.com", "", "high", NOW, asn="AS64501") is None   # other network
+        assert match("session_reuse", "bob@contoso.com", "", "high", NOW, asn="AS64500") is None    # other user
+        assert match("mailbox_forwarding", "jane@contoso.com", "", "high", NOW, asn="AS64500") is None
+        assert match("session_reuse", "jane@contoso.com", "", "high", NOW + timedelta(days=399), asn="AS64500")
+        for broad in (_mute(type="session_reuse", user="*", asn="AS64500"),    # all users
+                      _mute(type="*", asn="AS64500")):                        # all types
+            m = admin_store.add_mute(table, broad, "admin@contoso.com", NOW)
+            assert not m["hides_high"]
+        assert match("session_reuse", "sam@contoso.com", "", "high", NOW, asn="AS64500") is None
+        assert match("session_reuse", "sam@contoso.com", "", "medium", NOW, asn="AS64500")
 
     def test_refresh_loads_mutes(self):
         table = FakeTable()
@@ -818,3 +836,12 @@ class TestSecretSetting:
         assert json.loads(r.get_body())["changes"][0]["new"] == "(replaced)"
         r = put(2, {"PROXYCHECK_API_KEY": ""})
         assert json.loads(r.get_body())["changes"][0]["new"] == "(not set)" and config.PROXYCHECK_API_KEY == ""
+
+
+def test_high_alert_email_offers_a_mute_only_with_a_network():
+    import alerting
+    with patch("alerting.ui_link", side_effect=lambda *parts: "https://func.example/" + "/".join(parts)):
+        with_net = alerting._respond_links("jane@contoso.com", "session_reuse", "high", "", "AS64500", "Example")
+        without = alerting._respond_links("jane@contoso.com", "session_reuse", "high")
+    assert "mute similar alerts" in with_net and "AS64500" in with_net
+    assert "mute similar alerts" not in without

@@ -48,6 +48,7 @@ function/
 ├── mailbox_rules.py        # Inbox rules through Graph: list, assess, turn off or on
 ├── onboarding.py           # Onboarding scan: audit history, inbox rule sweep, audit search, starting-state report
 ├── audit_search.py         # Graph audit log search (up to 180 days): onboarding history, user page audit log
+├── failed_signins.py       # Failed sign-ins per day (Overview: password spraying, no alerts)
 ├── mail_access.py          # MailItemsAccessed and Send counts per day (is mail access logged?)
 ├── settings.py             # Runtime settings: schema, validation, defaults, overrides
 ├── admin_store.py          # Table Storage for the UI: overrides, history, email journal, mutes, audit searches
@@ -161,7 +162,7 @@ Some sign-in records have a `UserId` that is not a UPN (for example `Not Availab
 2. Get the IP from `ClientIP`, `ActorIpAddress`, or `ExtendedProperties.ClientIPAddress`. `clean_ip()` returns the canonical form.
 3. Skip private IPs, allowlisted IPs, and processed events.
 4. Look up the IPs: iCloud Private Relay IPs from Apple's list (if trusted: no flags, country from the list), then the cache (24 h for results, 5 min for failures), then one proxycheck.io batch POST for the rest.
-5. Classify. Tor, proxy, compromised server: high. VPN, hosting, inference engine, risk 66 or more: medium. Risk at or above the threshold: low.
+5. Classify. Tor, compromised server, and a proxy with attacks that proxycheck.io recorded: high. VPN, other proxy, hosting, inference engine, risk 66 or more: medium. Risk at or above the threshold: low.
 6. Log each suspicious sign-in. Send an email or queue it for the digest, as set by `LOGIN_ALERT_CONFIDENCE` and `LOGIN_ALERT_MODE`. A failed sign-in (wrong password) is only logged and kept in the journal (status "alert off"), unless `LOGIN_ALERT_FAILED` is on. A correct password stopped by MFA or Conditional Access is not a failure here. One alert goes out for each user, IP, outcome (success or failure), and UTC day (row `signinalert-<hash>` in the events table). The other records of the same sign-in are only logged.
 7. Send the sign-ins from IPs that are not flagged to the country baseline (`geo_monitor`). Save each new-country anomaly in `signincountries` (partition `pending`) before updating the baseline. Then log it, apply `ANOMALY_ACTION` (`responder`), and send an email. A failed delivery stays pending for up to 7 days, even after the source record leaves the fetch window. The response result is kept so an email retry does not repeat the action. Mark the sign-in processed only after the baseline and pending alerts are saved.
 
@@ -190,7 +191,7 @@ Each run:
 2. Reads each session from the table `signinsessions` (one row per session: user, IPs with their countries, risky IPs, countries with first and last time, alerts already sent).
 3. Looks up the IPs that are new for the session (cache first, then proxycheck.io). Microsoft-owned networks are checked too: Azure hosts customer VMs. A VPN, proxy, hosting, or Tor IP (the same test as the suspicious sign-in check) is marked as risky. IPs that an earlier version excluded by network ownership are checked again.
 4. A country that is new for a session that already has another country is a finding (`session_reuse`): high, or medium if the country is a home country or usual for the user.
-5. A risky IP that is new for a session in the same country is a finding (`session_reuse`) if all of these are true: the session already has a normal IP, the record is not a sign-in, and the IP did not sign in as the user in the last 7 days. The severity is medium, or high for a Tor, proxy, or compromised-server IP. There is one finding per session. A sign-in from a risky IP gets a suspicious sign-in alert. Mail reads and sends are left to the mail access check while it is on.
+5. A risky IP that is new for a session in the same country is a finding (`session_reuse`) if all of these are true: the session already has a normal IP, the record is not a sign-in, and the IP did not sign in as the user in the last 7 days. The severity is medium, or high for a Tor or compromised-server IP, or a proxy with recorded attacks. There is one finding per session. A sign-in from a risky IP gets a suspicious sign-in alert. Mail reads and sends are left to the mail access check while it is on.
 6. The alert goes out like a compromise indicator. After it is sent, the country (or the risky-IP finding) is marked as alerted for the session.
 
 The weekly cleanup deletes rows older than 30 days. Microsoft's AiTM hunting guidance uses the same join (session ID, different country).
@@ -336,7 +337,7 @@ Slack text escapes `& < >`, and the Teams card uses plain TextRun elements. So n
 | Resource group | `rg-<name>` | Holds all Azure resources |
 | User-assigned managed identity | `id-<name>` | The only credential of the monitor app (federated identity credential), and storage access |
 | Storage account | `st<name><6hex>` (no hyphens, at most 24 characters) | No public blobs, TLS 1.2, HTTPS only. Shared key access is turned off after the setup. The managed identity has Storage Blob Data Owner and Storage Table Data Contributor |
-| Tables | In the storage account | `processedevents` (partitions: `events` dedup, `system` checkpoints, flags, the onboarding state, and mail access counts (15 days), `logindigest`, `outbox`, `pendingip`), `ipcache`; created when used: `useridcache`, `signincountries`, `signinsessions` (session countries, 30 days), `monitoradmin` (UI overrides, the proxycheck.io key, history, email journal, mutes, the last audit search per user), `monitorfindings` (findings journal, 90 days) |
+| Tables | In the storage account | `processedevents` (partitions: `events` dedup, `system` checkpoints, flags, the onboarding state, mail access counts (15 days), and failed sign-in counts (8 days), `logindigest`, `outbox`, `pendingip`), `ipcache`; created when used: `useridcache`, `signincountries`, `signinsessions` (session countries, 30 days), `monitoradmin` (UI overrides, the proxycheck.io key, history, email journal, mutes, the last audit search per user), `monitorfindings` (findings journal, 90 days) |
 | Blob container `deployments` | In the storage account | The code package. The Functions host reads it with the managed identity |
 | Log Analytics workspace | `log-<name>` | Logs, 90 days |
 | Application Insights | `appi-<name>` | Logs and the source of the reports |

@@ -243,7 +243,7 @@ def _mute_row(entity: dict) -> dict:
             "network": entity.get("network", ""), "until": entity.get("until", ""),
             "reason": entity.get("reason", ""), "created_by": entity.get("created_by", ""),
             "created_at": entity.get("created_at", ""), "ended_by": entity.get("ended_by", ""),
-            "ended_at": entity.get("ended_at", "")}
+            "ended_at": entity.get("ended_at", ""), "hides_high": hides_high(entity)}
 
 
 def list_mutes(table, now: datetime, include_expired: bool = False) -> list:
@@ -359,12 +359,13 @@ def active_mutes(now: Optional[datetime] = None) -> list:
 
 def matching_mute(ftype: str, user: str, rule_name: str = "", severity: str = "",
                   now: Optional[datetime] = None, asn: str = "") -> Optional[dict]:
-    """The active mute that hides this alert, or None. High alerts are never muted.
+    """The active mute that hides this alert, or None.
 
-    A mute with an ASN hides only alerts whose source IP is in that network (``asn``).
+    A mute with an ASN hides only alerts whose source IP is in that network (``asn``). A high
+    alert is hidden only by a mute that names one alert type, one user, and one network
+    (hides_high): for example one user behind a known proxy. A muted alert gets no automatic
+    response.
     """
-    if severity == "high":
-        return None
     now = now or _now()
     user = str(user or "").strip().lower()
     rule_name = str(rule_name or "").strip().lower()
@@ -378,8 +379,15 @@ def matching_mute(ftype: str, user: str, rule_name: str = "", severity: str = ""
             continue
         if m.get("asn") and m["asn"] != config.normalize_asn(asn):
             continue
+        if severity == "high" and not hides_high(m):
+            continue
         return m
     return None
+
+
+def hides_high(mute: dict) -> bool:
+    """True if the mute also hides high alerts: one alert type, one user, and one network."""
+    return mute.get("type", "*") != "*" and mute.get("user", "*") != "*" and bool(mute.get("asn"))
 
 
 def _newest(table, partition: str, limit: int) -> list:
