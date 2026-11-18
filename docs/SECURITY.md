@@ -13,17 +13,17 @@ Permissions, secrets, protections, and known limitations.
 | Microsoft Graph | `MailboxSettings.Read` | Application | Always, unless `MailboxSettings.ReadWrite` replaces it | Read the inbox rules of every mailbox (onboarding scan, user page). It can read the mailbox settings of every user (rules, automatic replies, time zone). It cannot read mail |
 | Microsoft Graph | `AuditLogsQuery.Read.All` | Application | Always | Search the audit log in Microsoft Purview: up to 180 days of history for the onboarding scan, and the audit log search on the user page. It reads the same audit data as `ActivityFeed.Read`. Each user page search is in History. The scoped pair `AuditLogsQuery-Exchange.Read.All` and `AuditLogsQuery-Entra.Read.All` also works, with Exchange and Entra ID records only |
 | Microsoft Graph | `RoleManagement.Read.Directory` | Application | Always | Read directory role assignments: who has Global Administrator and the other roles in Settings > Management UI access. Read only |
-| Microsoft Graph | `Application.Read.All` | Application | Always | Read service principals: which tenant owns the app that made a change. An app consent by a Microsoft first-party app is journaled as "Microsoft service" and not emailed. MFA and role changes always alert. Read only; it reads app settings and credential metadata, not secrets |
+| Microsoft Graph | `Application.Read.All` | Application | Always | Read service principals: which tenant owns the app that made a change. An app consent by a Microsoft first-party app is journaled as "Microsoft service" and not emailed. MFA and role changes always alert. Read only. It reads app settings and credential metadata. It does not read secrets |
 | Microsoft Graph | `Mail.Send` | Application | Only with `-MailSendScope tenant` | Send alert emails from `ADMIN_EMAIL`. With `-MailSendScope mailbox` (the default), Exchange Online RBAC for Applications grants "Application Mail.Send" for the members of the group `<name>-senders` only |
 | Microsoft Graph | `User.RevokeSessions.All` | Application | Response permissions | Revoke sessions (automatic, and from the user page) |
 | Microsoft Graph | `User.EnableDisableAccount.All`, `User.Read.All` | Application | Response permissions | Block and unblock sign-in (automatic, and from the user page); read account state |
-| Microsoft Graph | `MailboxSettings.ReadWrite` | Application | Response permissions | Turn inbox rules off or on (automatic, and from the user page). It can change mailbox settings and rules of every mailbox; limit it with RBAC for Applications if needed |
+| Microsoft Graph | `MailboxSettings.ReadWrite` | Application | Response permissions | Turn inbox rules off or on (automatic, and from the user page). It can change mailbox settings and rules of every mailbox. If necessary, limit it with RBAC for Applications |
 | Microsoft Graph (management UI app) | `User.Read` | Delegated | Always | Sign-in to the management UI only |
 | Application Insights resource | Monitoring Reader | Azure RBAC | Always | Read the monitor's own traces for the weekly and monthly reports |
 | Health alert action group | Monitoring Contributor | Azure RBAC | Always | Set the action group email when the alert mailbox changes in the management UI. Scoped to that one action group |
 | Storage account | Storage Blob Data Owner, Storage Table Data Contributor | Azure RBAC (managed identity) | Always | The Functions host (timers, code package) and the app's tables |
 
-The response permissions are granted only if you answer yes (default) or use `-ResponsePermissions yes`. The responses stay off until you turn them on in the management UI. `-ResponsePermissions no` removes them.
+`install.ps1` grants the response permissions only if you answer yes (default) or use `-ResponsePermissions yes`. The responses stay off until you turn them on in the management UI. `-ResponsePermissions no` removes them.
 
 Graph `Mail.Send` (Application) lets the app send as any mailbox in the tenant. The default install does not grant it: Exchange Online limits the app to the members of one group, which the app cannot change ([How-To](HOW_TO.md#limit-mailsend-to-the-alert-mailbox)).
 
@@ -31,7 +31,7 @@ Monitoring Reader applies to the one Application Insights resource only. It give
 
 ## Management UI
 
-The UI trusts its admins. It is not built to stop an attacker who already controls a `Monitor.Admin` account and targets this monitor: such a person can change recipients, add mutes, weaken detection, and use the response actions. The controls below keep out people who are not admins, and keep each change visible (History and an email to the alert mailbox).
+The UI trusts its admins. It is not built to stop an attacker who already controls a `Monitor.Admin` account and targets this monitor. Such a person can change recipients, add mutes, weaken detection, and use the response actions. The controls below keep out people who are not admins. They also keep each change visible (History and an email to the alert mailbox).
 
 Protections:
 
@@ -43,12 +43,12 @@ Protections:
 | Script injection | A strict Content-Security-Policy (`script-src 'self'`, no inline script). The page puts all data into the DOM as text, never as HTML. |
 | Clickjacking | `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
 | A silent change by an attacker | Each change is recorded in History and emailed to the alert mailbox. The email links to History. |
-| Recipients changed | The alert mailbox, extra recipients, and the tenant name are UI settings. Each change is recorded in History and emailed. A new alert mailbox must pass a test send before the save, and the old address gets a notice. The Graph permissions are set by `install.ps1`, not in the UI. |
-| Invalid values | The server validates every value (types, ranges, addresses, country codes, ASNs, alert types). A setting that needs a missing Graph permission is refused. |
+| Recipients changed | The alert mailbox, extra recipients, and the tenant name are UI settings. Each change is recorded in History and emailed. A new alert mailbox must pass a test send before the save, and the old address gets a notice. `install.ps1` sets the Graph permissions. The UI does not set them. |
+| Invalid values | The server checks every value (types, ranges, addresses, country codes, ASNs, alert types). A setting that needs a missing Graph permission is refused. |
 | Detection turned down | Alert types off, allowed IPs, and allowed networks ask for confirmation in the UI, are recorded in History, and are emailed. |
 | Alerts muted | A mute hides medium alerts only, for at most 3650 days, and needs a reason. A mute can be limited to one network (ASN). Each mute is recorded in History and emailed. Muted alerts are still in the findings journal. The weekly and monthly reports list the active mutes. |
 | Accounts changed from the UI | The user page can revoke sessions, block or unblock sign-in, and turn inbox rules off or on, only as far as the app's Graph permissions allow. It refuses to block the alert mailbox and the admin's own account. Graph refuses changes to admin accounts. Each action is recorded in History and emailed. |
-| Management UI session | The sign-in (App Service Authentication) lasts 8 hours, or the time set with `./install.ps1 -UiSessionHours`. Blocking an admin or revoking the admin's sessions does not end it, unless Settings > Management UI access > **End the session of a blocked or revoked admin** is on (off by default; each request then reads the account from Graph). See [How fast a revoke or block applies](HOW_TO.md#how-fast-a-revoke-or-block-applies). |
+| Management UI session | The sign-in (App Service Authentication) lasts 8 hours, or the time set with `./install.ps1 -UiSessionHours`. Blocking an admin or revoking the admin's sessions does not end it. It ends only if Settings > Management UI access > **End the session of a blocked or revoked admin** is on. This setting is off by default. When it is on, each request reads the account from Graph. See [How fast a revoke or block applies](HOW_TO.md#how-fast-a-revoke-or-block-applies). |
 
 If you set a webhook, alerts (user names, IP addresses, and the alert text, not the raw audit record) go to that service. The monitor posts over HTTPS only, does not follow redirects, and refuses a host that resolves to a private, loopback, link-local, or reserved address. The webhook URL is stored as a secret in Table Storage.
 
@@ -86,7 +86,7 @@ The app does not follow a URL that fails the check, and logs an error. Because o
 - Token errors log the HTTP status, the error name, and the AADSTS codes only. They do not log the response body.
 - Logs contain UPNs, IP addresses, and inbox rule details. Control access to Application Insights.
 - The app downloads Apple's public list of iCloud Private Relay IPs (`mask-api.icloud.com`) once a day. It sends no tenant data to Apple.
-- Table Storage keeps, for 30 days, the Entra session IDs of users with the IPs and countries seen in each session (`signinsessions`). A session ID is not a credential, but control access to the storage account.
+- Table Storage keeps, for 30 days, the Entra session IDs of users with the IPs and countries seen in each session (`signinsessions`). A session ID is not a credential. Still, control access to the storage account.
 - Table Storage keeps, for 90 days, one row per finding (`monitorfindings`): user, type, description, IP, and what the monitor did. Control access to the storage account.
 - The extra recipients (Settings > Email) can be outside the tenant. Alert emails contain UPNs, IP addresses, and audit records.
 
@@ -96,10 +96,10 @@ The app does not follow a URL that fails the check, and logs an error. Because o
 |---|---|---|
 | Event `Id` (Table Storage RowKey) | Management API | `/ \ # ? ' "` and control characters become `_` |
 | `ClientIP` | Management API | `clean_ip()` parses all known formats and returns the canonical form (IPv4-mapped IPv6 unwrapped, IPv6 lowercase and compressed) |
-| Recipient addresses in rules and forwarding | Management API | Every SMTP address in every forward field is checked. A value with no SMTP address causes an alert. |
+| Recipient addresses in rules and forwarding | Management API | The app checks every SMTP address in every forward field. A value with no SMTP address causes an alert. |
 | Risk score | proxycheck.io | Integer, clamped to 0–100. 0 if not valid. |
 | proxycheck.io per-IP result | proxycheck.io | Used only if it is an object with a `proxy` field |
-| Latest release (update check) | GitHub API, once a day (`UPDATE_CHECK`) | Only a `MAJOR.MINOR.PATCH` tag is used; drafts and pre-releases are skipped. The release link is shown only if it starts with `https://github.com/<UPDATE_REPO>/`. The answer is shown, never run: the monitor does not download or install code. The request has no sign-in and no tenant data |
+| Latest release (update check) | GitHub API, once a day (`UPDATE_CHECK`) | Only a `MAJOR.MINOR.PATCH` tag is used. Drafts and pre-releases are skipped. The release link is shown only if it starts with `https://github.com/<UPDATE_REPO>/`. The answer is shown, never run: the monitor does not download or install code. The request has no sign-in and no tenant data |
 | Values in alert emails | All sources | HTML-escaped. Links: the object ID must be a GUID; the href is escaped. |
 | UPN in the Graph lookup URL | Management API | URL-encoded with no safe characters |
 | `/api/recent` `hours`, `limit` | HTTP | Integers, clamped to 1–168 and 1–500. 400 if not integers. |
@@ -147,12 +147,12 @@ Apply these repository settings (GitHub > Settings):
 | Automated response (`revoke`, `disable`, inbox rule off) | A wrong geolocation, a wrong alert, or code that runs as the app can lock users out or turn off a legitimate rule | Off by default; exempt list; `ADMIN_EMAIL` exempt; 3 account actions per day; no action on admin accounts (no directory role); only high alerts about the account itself; rules are turned off, not deleted; undo steps in each alert |
 | Management UI admin account compromised | The attacker can weaken detection (settings, mutes) and, with the response permissions, block users or turn off rules | Few people with access (Monitor.Admin, listed users, listed roles), all with MFA; change emails; History; Conditional Access if available; high alerts cannot be muted |
 | `MailboxSettings.Read` is tenant-wide (always granted) | Code that runs as the app can read the mailbox settings and inbox rules of every user | Read only, no mail content. Restrict Azure RBAC on the resource group |
-| iCloud Private Relay trusted (default) | An attacker who uses Private Relay causes no VPN alert | New-country, session, and compromise alerts still apply; the country comes from Apple's list; the setting can be turned off |
+| iCloud Private Relay trusted (default) | An attacker who uses Private Relay causes no VPN alert | New-country, session, and compromise alerts still apply; the country comes from Apple's list; you can turn off the setting |
 | IP geolocation | Wrong country for some IPs, mostly mobile networks | One alert per user and country per day; a country becomes normal after 3 days |
 | Flex Consumption and `WEBSITE_AUTH_ENABLED` | Microsoft does not document whether Flex Consumption sets `WEBSITE_AUTH_ENABLED` when App Service Authentication is on. The management UI requires it | Fail closed: without it, the UI shows "The management UI is off: App Service Authentication is not detected" and never trusts the identity header. Alerts, reports, and `/api/status` still work. Do not set the variable by hand |
 | Flex Consumption platform limits | The host must start within 30 seconds. A deployment to a stopped app reports success but starts no functions (a known Microsoft bug) | `install.ps1` starts the app before it deploys. The no-runs alert sends an email after 1 hour without a run |
-| An admin-level attacker turns off unified audit logging | No content arrives | The `Set-AdminAuditLogConfig` record causes a high alert if it arrives. Error after `NO_CONTENT_ALERT_HOURS` (48 h), then the errors alert |
-| Record formats checked against Microsoft documentation and public sample records, not a live tenant export | A detection may not fire on a record format that differs | [API Compatibility](API_COMPATIBILITY.md#record-formats) lists the fields and what is not confirmed. Compare with a record from Microsoft Purview > Audit |
+| An admin-level attacker turns off unified audit logging | No content arrives | The `Set-AdminAuditLogConfig` record causes a high alert if it arrives. If no audit content arrives for `NO_CONTENT_ALERT_HOURS` (48 h), the monitor logs an error and the errors alert fires |
+| Record formats checked against Microsoft documentation and public sample records, not a live tenant export | A detection can miss a record whose format differs | [API Compatibility](API_COMPATIBILITY.md#record-formats) lists the fields and what is not confirmed. Compare with a record from Microsoft Purview > Audit |
 
 ## Review history
 
@@ -163,7 +163,7 @@ The November 2026 review fixed:
 - proxycheck.io key in logs (exception text and urllib3 retry warnings).
 - Inbox rule bypasses: `ForwardAsAttachmentTo` was not checked if `ForwardTo` was set; only the last recipient domain was checked; `UpdateInboxRules` (Outlook and EWS) was not parsed.
 - No detection of mailbox forwarding (`Set-Mailbox`) or of application permission grants (`AppRole.Value`); scopes without a dot (`full_access_as_app`) were not matched.
-- A sign-in mark could hide a failed compromise alert for the same event.
+- A sign-in mark was able to hide a failed compromise alert for the same event.
 - A missing `Audit.Exchange` subscription stopped all detection. A Graph token failure stopped the run.
 - An outage longer than the lookback lost content with no log entry.
 - `/api/status` reported healthy for a proxycheck.io `denied` status.
@@ -173,8 +173,13 @@ The November 2026 review fixed:
 
 A further November 2026 review fixed:
 
-- Wrong-password attempts could revoke sessions or block the named account when failed-sign-in email and automatic response were both on. The responder now requires proof of the password for failed sign-ins, regardless of the email setting.
-- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes Exchange Graph REST service records only with both the client marker and Graph resource ID, records (not sign-ins) from Microsoft 365 server ranges: the Office 365 endpoints list minus every Azure service tag range, so no Azure customer space (`microsoft_nets.py`, checked monthly in CI), and Exchange records that a Microsoft-owned service wrote with a token for its own API (`mail_access.relaying_app`; an app of another tenant does not count). Known gap: a Power Automate flow that an attacker made also runs as a Microsoft service.
-- X.500 forwarding recipients were assumed to be internal. A directory contact can deliver externally. The audit rule detector and inbox rule sweep now flag unresolved recipients for verification. An unverified recipient alone is medium and gets no automatic response.
+- Wrong-password attempts were able to revoke sessions or block the named account when failed-sign-in email and automatic response were both on. The responder now requires proof of the password for failed sign-ins, regardless of the email setting.
+- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes these records:
+  - Exchange Graph REST service records, but only if they have both the client marker and the Graph resource ID.
+  - Records (not sign-ins) from Microsoft 365 server ranges. These ranges are the Office 365 endpoints list minus every Azure service tag range, so they contain no Azure customer space (`microsoft_nets.py`, checked monthly in CI).
+  - Exchange records that a Microsoft-owned service wrote with a token for its own API (`mail_access.relaying_app`). An app of another tenant does not count.
+
+  Known gap: a Power Automate flow that an attacker made also runs as a Microsoft service.
+- The app assumed that X.500 forwarding recipients were internal. A directory contact can deliver externally. The audit rule detector and inbox rule sweep now flag unresolved recipients for verification. An unverified recipient alone is medium and gets no automatic response.
 
 `tests/test_security_regressions.py` covers these cases, their controls, and migration of saved session data.

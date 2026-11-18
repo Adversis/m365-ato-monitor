@@ -2,7 +2,7 @@
 
 The external APIs that the tool uses, the permissions, and the constraints. Reviewed: November 2026.
 
-All Microsoft APIs below are generally available. The app authenticates with OAuth 2.0 client credentials (v2.0 token endpoint). The client credential is a client assertion: a token of the Function App's user-assigned managed identity for the audience `api://AzureADTokenExchange`, which the app registration trusts as a federated identity credential. Table Storage uses a managed identity token directly. There is no client secret. The app does not use basic auth.
+All Microsoft APIs below are generally available. The app authenticates with OAuth 2.0 client credentials (v2.0 token endpoint). The client credential is a client assertion. The assertion is a token of the Function App's user-assigned managed identity for the audience `api://AzureADTokenExchange`. The app registration trusts this token as a federated identity credential. Table Storage uses a managed identity token directly. There is no client secret. The app does not use basic auth.
 
 Cloud: commercial only. The token endpoint (`login.microsoftonline.com`) and the Management API host (`manage.office.com`) are fixed in the code.
 
@@ -54,13 +54,13 @@ Common fields:
 | `Operation` | Learn sometimes uses another case than records (`Set company information.`) | Matched without case |
 | `ResultStatus` | Exchange admin: `True`, `False`. Other workloads: `Succeeded`, `PartiallySucceeded`, `Failed`; Entra ID: `Success`, `Failure`. | A failed operation causes no compromise alert. User agent checks include failed sign-ins; a wrong password sends email only with `LOGIN_ALERT_FAILED`. |
 | `ClientIP` | Exchange admin records add a port: `198.51.100.20:54321`, `[2001:db8::5]:443`. Empty or null for Entra ID admin activity. | `extract_ip` reads `ClientIP`, `ClientIPAddress` (mailbox records), `ActorIpAddress` (Entra ID), `ActorIP`, `ExtendedProperties[ClientIPAddress]`, and returns the first public address |
-| `UserId` | A UPN, or `NT AUTHORITY\SYSTEM (...)`, `NT SERVICE\<service> (...)`, a service SID (`S-1-5-18`, or `S-1-5-80-...`, the SID form of `NT SERVICE\`), `Certificate` (a Microsoft service), or `ServicePrincipal_<id>` | Service accounts are skipped for permission changes. `Certificate` adding a Microsoft first-party app (app ID `xxxxxxxx-0000-0000-c000-000000000000` or `xxxxxxxx-0000-0ff1-ce00-000000000000`) to a role is skipped. For `ServicePrincipal_<object ID>`, the monitor reads the service principal's `appOwnerOrganizationId` (Graph, `Application.Read.All`): a Microsoft tenant (`f8cdef31-a31e-4b4a-93e4-5f571e91255a`, `72f988bf-86f1-41af-91ab-2d7cd011db47`) means a Microsoft service. For an app consent only, the finding is then journaled as "Microsoft service" without email. MFA method changes also have a Microsoft service as `UserId`; they are never skipped as a Microsoft service. They send email unless the person who made the change signed in from a known network and no one involved had another alert (see [Architecture](ARCHITECTURE.md)). For a service principal, the alert names it from `Actor` type 1 (for example `Azure MFA StrongAuthenticationService`). |
+| `UserId` | A UPN, or `NT AUTHORITY\SYSTEM (...)`, `NT SERVICE\<service> (...)`, a service SID (`S-1-5-18`, or `S-1-5-80-...`, the SID form of `NT SERVICE\`), `Certificate` (a Microsoft service), or `ServicePrincipal_<id>` | Service accounts are skipped for permission changes. `Certificate` adding a Microsoft first-party app (app ID `xxxxxxxx-0000-0000-c000-000000000000` or `xxxxxxxx-0000-0ff1-ce00-000000000000`) to a role is skipped. For `ServicePrincipal_<object ID>`, the monitor reads the service principal's `appOwnerOrganizationId` (Graph, `Application.Read.All`): a Microsoft tenant (`f8cdef31-a31e-4b4a-93e4-5f571e91255a`, `72f988bf-86f1-41af-91ab-2d7cd011db47`) means a Microsoft service. For an app consent only, the finding is then journaled as "Microsoft service" without email. MFA method changes also have a Microsoft service as `UserId`. They are never skipped as a Microsoft service. They send email unless the person who made the change signed in from a known network and no one involved had another alert (see [Architecture](ARCHITECTURE.md)). For a service principal, the alert names it from `Actor` type 1 (for example `Azure MFA StrongAuthenticationService`). |
 
 Operations:
 
 | Operation | Fields |
 |---|---|
-| `UserLoggedIn`, `UserLoginFailed` | `ExtendedProperties`: `UserAgent` (`BAV2ROPC` is legacy authentication), `RequestType` (`Cmsi:Cmsi` is the device code flow; other values: `OAuth2:Authorize`, `Login:login`), `ResultStatusDetail`. Failure: `ErrorNumber` (AADSTS code; `ErrorCode` in the schema document) and `LogonError` (the code name, for example `UserStrongAuthClientAuthNRequiredInterrupt` = 50074). Some records have only `LogonError`; `config.LOGON_ERROR_CODES` maps the names. |
+| `UserLoggedIn`, `UserLoginFailed` | `ExtendedProperties`: `UserAgent` (`BAV2ROPC` is legacy authentication), `RequestType` (`Cmsi:Cmsi` is the device code flow; other values: `OAuth2:Authorize`, `Login:login`), `ResultStatusDetail`. Failure: `ErrorNumber` (AADSTS code; `ErrorCode` in the schema document) and `LogonError` (the code name, for example `UserStrongAuthClientAuthNRequiredInterrupt` = 50074). Some records have only `LogonError`. `config.LOGON_ERROR_CODES` maps the names. |
 | `Consent to application.` | `ModifiedProperties[ConsentAction.Permissions].NewValue`: `[[... Scope: a b]] => [[... Scope: a b c]]; `. App name: `Target` type 1. |
 | `Add app role assignment to service principal.` | `ModifiedProperties[AppRole.Value].NewValue` is the permission (for example `full_access_as_app`). App name: `ServicePrincipal.DisplayName`. |
 | `Add OAuth2PermissionGrant.`, `Add delegated permission grant.` | Delegated grants. Scopes in a `ModifiedProperties` entry whose name contains `Scope` or `Permission`. |
@@ -78,14 +78,14 @@ Operations:
 | `Update application – Certificates and secrets management ` | En dash and a trailing space in real records. `ModifiedProperties[KeyDescription]`. App name: `Target` type 1 or `ExtendedProperties[targetName]`. |
 | Domains | `Set domain authentication.`, `Set federation settings on domain.` (federation); `Add domain to company.`, `Verify domain.`, `Add verified domain.`, `Add unverified domain.` (domain added) |
 
-`Disable Strong Authentication.` is confirmed (Microsoft Learn password-spray playbook; a real record has `StrongAuthenticationRequirement` going to `[]`).
+`Disable Strong Authentication.` is confirmed by the Microsoft Learn password-spray playbook and by a real record, where `StrongAuthenticationRequirement` goes to `[]`.
 
-Not confirmed in Microsoft documentation or in sample records: `Set-TransportRule` and `New-ManagementRoleAssignment` record examples (the parameter names are confirmed in the cmdlet reference), and the `UpdateInboxRules` `ActionType` names other than `Forward` and `DeferAction`. Compare with a record from Microsoft Purview > Audit if one of these detections does not fire when you expect it to.
+Not confirmed in Microsoft documentation or in sample records: `Set-TransportRule` and `New-ManagementRoleAssignment` record examples (the parameter names are confirmed in the cmdlet reference), and the `UpdateInboxRules` `ActionType` names other than `Forward` and `DeferAction`. If one of these detections does not fire when you expect it to, compare with a record from Microsoft Purview > Audit.
 
 Constraints:
 
 - Unified audit logging must be on. Otherwise no content exists. See [Getting Started](GETTING_STARTED.md#unified-audit-logging).
-- After a subscription starts, Microsoft can take up to 12 hours (often 12–24 hours) to deliver content.
+- After a subscription starts, Microsoft documents up to 12 hours to deliver content. In practice it often takes 12–24 hours.
 - Subscriptions are tenant-level. `./install.ps1 -Uninstall` does not stop them. They cost nothing, and a new installation uses them again.
 
 ---
@@ -121,7 +121,7 @@ Used by the onboarding scan (history before the last 7 days) and the user page (
 | Record | `auditData` is the audit record as a JSON object, with the Management Activity API fields (`CreationTime`, `Operation`, `UserId`, `Parameters`, ...) and an `@odata.type` key. Some types keep fields in `dynamicProperties`; the module merges them |
 | Retention | Audit (Standard): 180 days (all Microsoft 365 Business plans). Audit (Premium, E5 users): 1 year |
 
-Not verified against a live tenant yet: the record shape, the speed, and whether `GET /queries/{id}` accepts the scoped permissions.
+Not checked against a live tenant yet: the record shape, the speed, and whether `GET /queries/{id}` accepts the scoped permissions.
 
 ## App Service Authentication (management UI)
 
@@ -171,7 +171,7 @@ Response `status`:
 | `denied` | Quota used or key not valid | Log an error. Cache a failure for 5 minutes. |
 | `error` | No valid addresses | Log a warning |
 
-A per-IP object with no `proxy` field (for example `{"error": "Invalid or Internal IP Address."}`) is a failed lookup. The API leaves out some addresses (for example documentation ranges); the app treats them as failed lookups. The API returns each IP key as the client sent it, so the app sends canonical IPs.
+A per-IP object with no `proxy` field (for example `{"error": "Invalid or Internal IP Address."}`) is a failed lookup. The API leaves out some addresses (for example documentation ranges). The app treats them as failed lookups. The API returns each IP key as the client sent it, so the app sends canonical IPs.
 
 ---
 
@@ -186,8 +186,8 @@ Checked November 2026.
 | Python on Azure Functions | 3.11 support ends October 2027. 3.12 ends October 2028. Flex Consumption supports 3.10–3.14. | The tool runs on 3.12. Flex Consumption also offers 3.13 and later, so a later Python version needs no change of plan |
 | Azure CLI | `az functionapp create --flexconsumption-location` and the Flex deployment storage flags. `install.ps1` needs 2.60 or later | The script stops with "too old" and the fix `az upgrade` |
 | proxycheck.io v2 | v3 is current (June 2026). proxycheck.io supports v2 "until 2035". Limits: 100 queries per day without a key, 1,000 with a free key. | No change. A move to v3 needs a new response parser. |
-| Application Insights query API (`/v1/apps/{appId}/query`) | Current. The `beta` path ended March 2026; `batch` ends March 2028. Entra ID authentication is required. | No change (`/v1`, single queries, Entra token). |
-| Exchange Online application access policies | Replaced by RBAC for Applications; a deprecation is to be announced. | `install.ps1 -MailSendScope mailbox` uses RBAC for Applications: a management scope with `MemberOfGroup` (direct members only), and `Test-ServicePrincipalAuthorization` to check. Microsoft: changes apply in 30 minutes to 2 hours (cache). |
+| Application Insights query API (`/v1/apps/{appId}/query`) | Current. The `beta` path ended March 2026. `batch` ends March 2028. Entra ID authentication is required. | No change (`/v1`, single queries, Entra token). |
+| Exchange Online application access policies | Replaced by RBAC for Applications. Microsoft will announce a deprecation later. | `install.ps1 -MailSendScope mailbox` uses RBAC for Applications: a management scope with `MemberOfGroup` (direct members only), and `Test-ServicePrincipalAuthorization` to check. Microsoft: changes apply in 30 minutes to 2 hours (cache). |
 
 ## iCloud Private Relay egress list
 

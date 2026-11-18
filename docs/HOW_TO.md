@@ -58,13 +58,13 @@ By default, a mail flow rule causes an alert only if it copies, redirects, or de
 2. In the **Triage** column of the alert, select **Investigating**, **Benign** (expected, not an attack), or **Resolved** (an attack that you handled).
 3. Enter a note if you want, for example who confirmed it. Select **Save**.
 
-To set more than one alert of a user: on **Users** > the user, select the alerts with the boxes in the first column (the box in the header selects the page), select a state above the list, then **Set triage**. One note applies to all of them.
+To set more than one alert of a user, open **Users** > the user. Select the alerts with the boxes in the first column. The box in the header selects the page. Select a state above the list, then select **Set triage**. One note applies to all of them.
 
-The Alerts view shows open and investigating alerts first; select **Triage** > **All** or one state to see the others. Triage changes only the list: later alerts for the same user or rule still send email (to stop them, use a mute). History records each change. Long lists have pages: use **Previous** and **Next**.
+The Alerts view shows open and investigating alerts first. To see the others, select **Triage** > **All** or one state. Triage changes only the list: later alerts for the same user or rule still send email. To stop them, use a mute. History records each change. Long lists have pages: use **Previous** and **Next**.
 
 The Overview shows the state as a tag on each recent alert (**Investigating**, **Benign**, or **Resolved**), with the note. Benign and resolved alerts are dimmed. An automatic response shows as "Response: ..." under the alert.
 
-A muted alert shows as **Benign** ("a mute applies") until an admin selects another state. Muted alerts, and alerts that Microsoft's own services caused, are dimmed. Alerts of a type that is off (for example failed sign-ins, when **Email failed sign-ins** is off) are not on the Overview or the Alerts view: open the user page to see them.
+A muted alert shows as **Benign** ("a mute applies") until an admin selects another state. Muted alerts, and alerts that Microsoft's own services caused, are dimmed. Alerts of a type that is off (for example failed sign-ins, when **Email failed sign-ins** is off) are not on the Overview or the Alerts view. To see them, open the user page.
 
 Under each alert, **Mute similar** (medium alerts only) opens the mute form with the alert type, the user, and the rule name filled in. **Respond on the user page** opens the page with revoke sessions, block sign-in, and the user's inbox rules.
 
@@ -72,14 +72,14 @@ Under each alert, **Mute similar** (medium alerts only) opens the mute form with
 
 ## Mute an expected alert
 
-A mute stops email for medium alerts that match it, for 1 to 3650 days. Use it for an alert that you confirmed and that repeats, for example a known newsletter rule or a user who travels with a hotel VPN.
+A mute stops email for medium alerts that match it, for 1 to 3650 days. Use it for an alert that you confirmed as expected and that repeats, for example a known newsletter rule or a user who travels with a hotel VPN.
 
 1. In a medium alert email, select **mute similar alerts**. Or: Management UI > **Alerts** > **Mute similar** under the alert. Or: Management UI > **Mutes**.
 2. Make the mute as narrow as possible:
    - **Alert type**: one type, or all types that can be muted.
    - **User**: one user, or `*` for all users. A mute for all users must name one alert type.
    - **Rule name** (inbox rules only): one rule.
-   - **Network (ASN)**: optional. The mute then hides only alerts from IPs in that network, for example `AS63023` (GTHost). **Mute similar** fills it from the alert. For an alert recorded before the monitor kept the ASN, it uses the IP cache, or looks up the alert IP once (one proxycheck.io query; none when the quota is low).
+   - **Network (ASN)**: optional. The mute then hides only alerts from IPs in that network, for example `AS63023` (GTHost). **Mute similar** fills it from the alert. For an alert recorded before the monitor kept the ASN, **Mute similar** uses the IP cache, or looks up the alert IP once. This uses one proxycheck.io query, or no query when the quota is low.
 3. Set **Days** (1–3650). Use the shortest time that covers the case.
 4. Enter a **Reason**. It is shown in History, in the email about the change, and in the weekly report.
 5. Select **Add mute**, then confirm.
@@ -98,7 +98,7 @@ A muted alert is not lost. It is recorded on the user page (Management UI > User
 
 Management UI > Settings > **Webhook**:
 
-1. **Webhook URL**: an incoming webhook URL. Slack: Apps > Incoming Webhooks > Add to Slack, choose a channel, and copy the URL. Microsoft Teams: in the channel, Workflows > "Post to a channel when a webhook request is received", and copy the URL. The URL is a secret: the monitor stores it like the proxycheck.io key and never shows it again.
+1. **Webhook URL**: an incoming webhook URL. Slack: Apps > Incoming Webhooks > Add to Slack. Choose a channel and copy the URL. Microsoft Teams: in the channel, select Workflows > "Post to a channel when a webhook request is received". Copy the URL. The URL is a secret: the monitor stores it like the proxycheck.io key and never shows it again.
 2. **Webhook message format**: Slack, Microsoft Teams (Workflows), or JSON for other services.
 3. **Send alerts by**: Email and webhook, or Webhook only. With Webhook only, an alert goes by email when the webhook fails.
 4. Save. Then send test alerts: Overview > Tools.
@@ -115,7 +115,7 @@ These people can open the management UI:
 - The users in Settings > Management UI access > **Users who can open the management UI**. Enter the address the person signs in with. For a guest, that is the guest's own address (for example `bob@fabrikam.com`), not the `#EXT#` name.
 - The members of the roles in Settings > Management UI access > **Directory roles that can open the management UI**: Global Administrator, Privileged Role Administrator, Security Administrator, Security Operator, or Exchange Administrator.
 
-The settings page shows who has each role now. Only active, direct role assignments for the whole tenant count (not a role scoped to an administrative unit). A PIM-eligible role counts only while it is active. A role assigned through a group does not count. The monitor reads role assignments from Microsoft Graph (`RoleManagement.Read.Directory`) and keeps the result for 5 minutes, so a change can take 5 minutes to apply.
+The settings page shows who has each role now. Only active, direct role assignments for the whole tenant count (not a role scoped to an administrative unit). A PIM-eligible role counts only while it is active. A role assigned through a group does not count. The monitor reads role assignments from Microsoft Graph (`RoleManagement.Read.Directory`) and keeps the result for 5 minutes. As a result, a change can take 5 minutes to apply.
 
 All people with access have the same rights: settings, mutes, and the response buttons. Every UI admin can weaken detection: give access only to security administrators. Each change is in History and is emailed to the alert mailbox, also with "Webhook only" delivery. To see which account you are signed in with, and why it has access, select your name at the top right.
 
@@ -129,7 +129,7 @@ Optional. The default address always works. To open the management UI at, for ex
 
 1. Azure portal > the Function App > **Custom domains** > **Add custom domain**. Add the DNS records that the portal shows (a CNAME record and a TXT record) and a certificate.
 2. Entra admin center > **App registrations** > `m365-ato-monitor-admin-ui` > **Authentication** > **Add URI**: `https://monitor.contoso.com/.auth/login/aad/callback`.
-3. Allow the new origin, so that changes in the UI work: `az functionapp cors add -g <resource group> -n <function app> --allowed-origins https://monitor.contoso.com`. Without it, a change fails with HTTP 403. Azure Monitor sends the Azure change alert for this step: it is expected.
+3. Allow the new origin, so that changes in the UI work: `az functionapp cors add -g <resource group> -n <function app> --allowed-origins https://monitor.contoso.com`. Without it, a change fails with HTTP 403. Azure Monitor sends the Azure change alert for this step. This alert is expected.
 
 A rerun of `install.ps1` keeps the redirect URI and the CORS entry. The links in the alert emails keep the default address.
 
@@ -149,7 +149,7 @@ The page shows the user's alerts for 90 days, sign-in countries, mutes, and acco
 
 ### How fast a revoke or block applies
 
-Revoke sessions and Block sign-in apply at once to new sign-ins and to refresh tokens. An app that is signed in already keeps its access token. When that token stops working depends on the app:
+Revoke sessions and Block sign-in apply at once to new sign-ins and to refresh tokens. An app that is signed in already keeps its access token. The time when that token stops working depends on the app:
 
 | App | When it stops | Why |
 |---|---|---|
@@ -160,14 +160,14 @@ Revoke sessions and Block sign-in apply at once to new sign-ins and to refresh t
 
 A CAE app gets long-lived tokens (up to 28 hours): it relies on CAE to stop. A password reset, and turning on MFA for the user, are CAE events too.
 
-The management UI of this monitor is not a CAE app. Its sign-in (App Service Authentication) lasts 8 hours and does not end when you block the admin or revoke the admin's sessions. Two options, both off by default:
+The management UI of this monitor is not a CAE app. Its sign-in (App Service Authentication) lasts 8 hours. It does not end when you block the admin or revoke the admin's sessions. Two options change this. Both are off by default:
 
 - `./install.ps1 -Update -UiSessionHours 1`: a sign-in lasts 1 hour (1 to 24). Later runs keep the value. After that time, the page signs in again through Entra ID, usually with no prompt.
-- Settings > Management UI access > **End the session of a blocked or revoked admin**: each request reads the admin's account from Microsoft Graph (at most once a minute) and is refused if the account is blocked, or its sessions were revoked after the sign-in. If Graph does not answer, the request is allowed. Needs `User.Read.All` (the response permissions).
+- Settings > Management UI access > **End the session of a blocked or revoked admin**: each request reads the admin's account from Microsoft Graph (at most once a minute). The monitor refuses the request if the account is blocked, or if its sessions were revoked after the sign-in. If Graph does not answer, the monitor allows the request. This option needs `User.Read.All` (the response permissions).
 
-To test a revoke, sign in to Outlook on the web and Outlook desktop, revoke, then use each app. The desktop app asks for a sign-in within some minutes; the web app can keep working for up to about 90 minutes. For an active attacker, block sign-in and revoke, then reset the password: each is a CAE event. Source: Microsoft Learn, [Continuous access evaluation](https://learn.microsoft.com/entra/identity/conditional-access/concept-continuous-access-evaluation) and [Access token lifetime](https://learn.microsoft.com/entra/identity-platform/configurable-token-lifetimes).
+To test a revoke, sign in to Outlook on the web and Outlook desktop. Revoke the sessions, then use each app. The desktop app asks for a sign-in within some minutes. The web app can keep working for up to about 90 minutes. For an active attacker, block sign-in and revoke, then reset the password. Each of these is a CAE event. Source: Microsoft Learn, [Continuous access evaluation](https://learn.microsoft.com/entra/identity/conditional-access/concept-continuous-access-evaluation) and [Access token lifetime](https://learn.microsoft.com/entra/identity-platform/configurable-token-lifetimes).
 
-`install.ps1` grants `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `User.Read.All`, and `MailboxSettings.ReadWrite` together: the response permissions. The script asks for them (default yes), or use `-ResponsePermissions yes`. A button is disabled, with the reason, when the permission is not granted. To grant the permissions later, run `./install.ps1 -ResponsePermissions yes`.
+`install.ps1` grants `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `User.Read.All`, and `MailboxSettings.ReadWrite` together: the response permissions. The script asks for them (default yes). Or use `-ResponsePermissions yes`. If the permission for a button is not granted, the button is disabled, with the reason. To grant the permissions later, run `./install.ps1 -ResponsePermissions yes`.
 
 Rules:
 
@@ -182,7 +182,7 @@ Rules:
 Management UI > **Users** > the user > **Audit log**. Select the period (7, 30, 90, or 180 days) and **Search**.
 
 - The list shows everything the user did: sign-ins, mail reads and sends (`MailItemsAccessed`, `Send`), inbox rules, and admin changes. Newest first, with the IP address and the client. At most 1,000 records.
-- **Network** and **Location** show the proxycheck.io answer for each IP: the network (organization, ASN), the risk score, the type (for example VPN or Hosting), and the city and country. A VPN, proxy, hosting, or high-risk IP is marked **Flagged**. Answers in the cache cost no query. Each load looks up at most 20 new IPs, newest first; **Look up more** looks up the next ones. When the daily quota is low or used up, the list looks up no new IPs: the monitor keeps the quota for its checks.
+- **Network** and **Location** show the proxycheck.io answer for each IP: the network (organization, ASN), the risk score, the type (for example VPN or Hosting), and the city and country. A VPN, proxy, hosting, or high-risk IP is marked **Flagged**. Answers in the cache cost no query. Each load looks up at most 20 new IPs, newest first. **Look up more** looks up the next ones. When the daily quota is low or used up, the list looks up no new IPs: the monitor keeps the quota for its checks.
 - Microsoft runs the search in the background. It typically takes 5 to 40 minutes. You can leave the page: the last search for the user shows again when you come back (for 30 days).
 - Use it after an alert: compare the IP addresses of the sign-ins with the IP addresses of the mail reads and sends.
 - Each search is recorded in History, with who started it.
@@ -191,18 +191,18 @@ Management UI > **Users** > the user > **Audit log**. Select the period (7, 30, 
 
 ## Check that mail reads are logged
 
-Mail that an attacker reads or sends with a stolen session leaves no inbox rule. Only `MailItemsAccessed` and `Send` records show it. Microsoft does not document for every license if these records are logged.
+Mail that an attacker reads or sends with a stolen session leaves no inbox rule. Only `MailItemsAccessed` and `Send` records show it. Microsoft does not document for every license whether it logs these records.
 
 Management UI > **Overview** > Monitor > **Mail access records, 7 days** shows the count. The weekly report has the same line.
 
-- A count above zero: the tenant logs mail access. The line also shows how many records have a client IP, a session ID, and an app ID.
+- A count more than zero: the tenant logs mail access. The line also shows how many records have a client IP, a session ID, and an app ID.
 - "None" after some days of normal use: the tenant does not log mail reads. Check the mailbox audit settings in Exchange Online PowerShell:
 
   ```powershell
   Get-Mailbox <user> | Select-Object -ExpandProperty AuditOwner
   ```
 
-  If `MailItemsAccessed` is not in the list, your licenses may not include it.
+  If `MailItemsAccessed` is not in the list, it is possible that your licenses do not include it.
 
 The mail access check (Settings > New sign-in countries > **Alert on mail read or sent from a risky IP**) uses these records. It alerts when mail is read or sent from a VPN, proxy, hosting, Tor, or new-country IP that did not sign in as the user in 7 days. Without mail access records, it does nothing. See [Alert Triage: mail_access](TRIAGE.md#mail_access).
 
@@ -213,15 +213,15 @@ The mail access check (Settings > New sign-in countries > **Alert on mail read o
 The scan starts by itself after the first monitor run. It sends one email, `[M365 Monitor] Starting state`, with:
 
 - Audit history, last 7 days: the detectors run on the audit content of the feed. The feed has content only from when the audit subscription started. For a new deployment, this is normally empty.
-- Audit history, older: the detectors run on older changes (not sign-ins) from the audit log search, up to 180 days back. Microsoft runs the search in the background. It typically takes 5 to 40 minutes and can take up to 48 hours, so the report can come some hours after the scan starts. Uses `AuditLogsQuery.Read.All`. `install.ps1` always grants it. If Microsoft stops the search at its record limit, the report says so.
+- Audit history, older: the detectors run on older changes (not sign-ins) from the audit log search, up to 180 days back. Microsoft runs the search in the background. It typically takes 5 to 40 minutes, and it can take up to 48 hours. As a result, the report can come some hours after the scan starts. This step uses `AuditLogsQuery.Read.All`. `install.ps1` always grants it. If Microsoft stops the search at its record limit, the report says so.
 - Sign-ins: VPN, proxy, and hosting sign-ins in the last 7 days. During the learning period, the countries of the other sign-ins go into the country baseline (at most 300 IP lookups).
-- Inbox rules: the rules of every mailbox, through Microsoft Graph. This finds rules that existed before the monitor started. Signs: external forwarding or redirect, delete, keywords with mark-as-read, move, or delete, and names with no letters. Graph does not show rules that only Outlook desktop runs, and the app cannot read the name of a rule's target folder. Uses `User.ReadBasic.All` and `MailboxSettings.Read` (or `MailboxSettings.ReadWrite`). `install.ps1` always grants them.
+- Inbox rules: the rules of every mailbox, through Microsoft Graph. This finds rules that existed before the monitor started. Signs: external forwarding or redirect, delete, keywords with mark-as-read, move, or delete, and names with no letters. Graph does not show rules that only Outlook desktop runs. The app cannot read the name of the target folder of a rule. This step uses `User.ReadBasic.All` and `MailboxSettings.Read` (or `MailboxSettings.ReadWrite`). `install.ps1` always grants them.
 - Checks the scan cannot do (mailbox forwarding, app consents, admin roles, MFA methods, mail flow rules, domains), with the place to check each one by hand.
 - Settings that weaken protection.
 
-No separate alert email is sent for the items in the report. Each item is on the user page in the management UI.
+The monitor sends no separate alert email for the items in the report. Each item is on the user page in the management UI.
 
-The scan runs in the background. Each step works for up to 75 seconds; the next step starts 5 minutes later. The total time depends on the number of mailboxes and on Graph response times. Management UI > Overview > Tools shows the progress.
+The scan runs in the background. Each step works for up to 75 seconds. The next step starts 5 minutes later. The total time depends on the number of mailboxes and on Graph response times. Management UI > Overview > Tools shows the progress.
 
 To run it again: Management UI > Overview > Tools > **Scan inbox rules** (rules only) or **Run the full scan again**. For example, run it after you take over a new tenant, or after an incident.
 
@@ -250,7 +250,7 @@ The run and sign-in counts come from Application Insights. If the query fails, t
    - **Extra recipients of reports**: the weekly, monthly, and starting-state reports, for example an outside vCISO.
 3. Select **Save changes**, then confirm.
 
-The change applies from the next email. It is recorded in History and emailed. The alert mailbox still sends and receives every email. The extra addresses can be outside the tenant. Alert emails contain user names, IP addresses, and audit records: send them only to addresses that may see this data.
+The change applies from the next email. It is recorded in History and emailed. The alert mailbox still sends and receives every email. The extra addresses can be outside the tenant. Alert emails contain user names, IP addresses, and audit records: send them only to addresses that are allowed to see this data.
 
 ---
 
@@ -275,7 +275,7 @@ proxycheck.io can flag IPs of mobile carriers (shared carrier NAT) as proxy or V
 
 US examples (check the ASN in your own alerts): T-Mobile USA `AS21928`, Verizon Wireless `AS6167` and `AS22394`, AT&T Mobility `AS20057`.
 
-An IP in an allowed network is never VPN, proxy, or hosting for sign-in alerts and for the severity of compromise alerts. New-country, session, and compromise alerts still apply. Attackers can rent IPs in mobile carrier networks ("mobile proxies"), so allow only the networks that cause false alerts. Do not allow cloud or CDN networks (for example Akamai or Cloudflare). For iCloud Private Relay, see the next section.
+An IP in an allowed network is never VPN, proxy, or hosting for sign-in alerts and for the severity of compromise alerts. New-country, session, and compromise alerts still apply. Attackers can rent IPs in mobile carrier networks ("mobile proxies"). Allow only the networks that cause false alerts. Do not allow cloud or CDN networks (for example Akamai or Cloudflare). For iCloud Private Relay, see the next section.
 
 ---
 
@@ -290,17 +290,17 @@ The monitor handles this by default (**Treat iCloud Private Relay as normal**, o
 - The country of a relay IP comes from Apple's list. Apple maps each relay IP to the user's approximate location, so the new-country and session checks still work.
 - Compromise alerts (inbox rules, forwarding, MFA changes, and others) are not affected.
 
-`/api/status` shows the list state under `config.private_relay_list` (ranges loaded, load time, last failure). If the download fails, relay IPs are checked by proxycheck.io as before, and the monitor tries again after 1 hour.
+`/api/status` shows the list state under `config.private_relay_list` (ranges loaded, load time, last failure). If the download fails, proxycheck.io checks relay IPs as before. The monitor tries again after 1 hour.
 
 To check relay IPs like any other IP: Management UI > Settings > Allowlists > clear **Treat iCloud Private Relay as normal**. Relay sign-ins then cause VPN alerts again, with "iCloud Private Relay" in the network name.
 
-An attacker with an Apple device and iCloud+ can also use Private Relay. The monitor then sees the country that Apple assigns to the attacker's location, which the new-country and session checks still compare.
+An attacker with an Apple device and iCloud+ can also use Private Relay. The monitor then sees the country that Apple assigns to the attacker's location. The new-country and session checks still compare this country.
 
 ---
 
 ## Add corporate IPs to the allowlist
 
-Do this if VPN or office egress IPs cause sign-in alerts.
+If VPN or office egress IPs cause sign-in alerts, add them to the allowlist.
 
 1. Management UI > Settings > Allowlists > **Allowed IPs and ranges**.
 2. Add one IP or range per line, for example `203.0.113.0/24`.
@@ -312,7 +312,7 @@ Single IPs and CIDR ranges are both valid. The app ignores and logs an entry tha
 
 ## Add internal mail domains
 
-The forwarding checks (inbox rules, mailbox forwarding, mail flow rules, folder sharing) treat as internal the acting user's mail domain and the tenant's verified domains (including `onmicrosoft.com`). `install.ps1` reads the verified domains on each run (app setting `TENANT_DOMAINS`). After you add a domain to the tenant, run `./install.ps1 -Update`, or add the domain here. Forwarding to another domain causes an alert. For a domain outside the tenant that counts as internal (for example a sister company):
+The forwarding checks (inbox rules, mailbox forwarding, mail flow rules, folder sharing) treat these domains as internal: the acting user's mail domain, and the tenant's verified domains (including `onmicrosoft.com`). `install.ps1` reads the verified domains on each run (app setting `TENANT_DOMAINS`). After you add a domain to the tenant, run `./install.ps1 -Update`, or add the domain here. Forwarding to another domain causes an alert. For a domain outside the tenant that counts as internal (for example a sister company):
 
 1. Management UI > Settings > Allowlists > **Internal mail domains**.
 2. Add one domain per line, for example `contoso.onmicrosoft.com`.
@@ -333,7 +333,7 @@ The key is stored in Table Storage. The UI never shows it again. History and the
 
 ### Check the proxycheck.io quota
 
-Management UI > Overview > Monitor > **IP lookups (proxycheck.io)** shows the state from the newest lookup answer: OK, Low (less than 10% left), Used up, or Refused (for example a disabled key). With a key, it also shows the count used today. For the count, turn on **Dashboard API Access** in the proxycheck.io dashboard. The monitor reads the count every 30 minutes; it does not use the quota.
+Management UI > Overview > Monitor > **IP lookups (proxycheck.io)** shows the state from the newest lookup answer: OK, Low (less than 10% left), Used up, or Refused (for example a disabled key). With a key, it also shows the count used today. For the count, turn on **Dashboard API Access** in the proxycheck.io dashboard. The monitor reads the count every 30 minutes. This read does not use the quota.
 
 The monitor emails the alert mailbox when the quota is low (80% used, or proxycheck.io says less than 10% is left), when it is used up, and when proxycheck.io refuses the key. Each email comes at most once per day. The weekly report also lists it.
 
@@ -376,7 +376,7 @@ A 1-minute timer seldom gives earlier alerts: Microsoft publishes audit content 
 
 The app always logs suspicious sign-ins to Application Insights and counts them in the roll-up. `/api/status` shows the active value.
 
-A failed sign-in (wrong password, for example error 50126) from a suspicious IP, an automation client, or an attack tool does not send email by default. The Alerts page shows it with the status "alert type off". To email failed sign-ins too, for example to see each IP of a password spray, turn on Settings > Suspicious sign-ins > **Email failed sign-ins** (`LOGIN_ALERT_FAILED`). A password spray can then cause many emails: use digest mode (next section) to batch them.
+A failed sign-in (wrong password, for example error 50126) from a suspicious IP, an automation client, or an attack tool does not send email by default. The Alerts page shows it with the status "alert type off". To email failed sign-ins too, turn on Settings > Suspicious sign-ins > **Email failed sign-ins** (`LOGIN_ALERT_FAILED`). For example, use it to see each IP of a password spray. A password spray can then cause many emails. To batch them, use digest mode: [Batch sign-in alerts into a digest](#batch-sign-in-alerts-into-a-digest).
 
 A sign-in whose password was correct, but that stopped at MFA or Conditional Access (for example errors 50074 and 50076), always sends email. The attacker knows the password.
 
@@ -417,7 +417,7 @@ Allowed IPs do not count. Microsoft-owned networks are checked because Azure hos
 
 To turn it off: Management UI > Settings > New sign-in countries > **Alert when a session moves to another country or a risky IP**.
 
-Limits: an attacker on a normal home or office network in the same country is not detected, and records without a session ID (Outlook desktop, some API access) are not checked. See README > What it does not detect.
+Limits: the monitor does not detect an attacker on a normal home or office network in the same country. It does not check records without a session ID (Outlook desktop, some API access). See README > What it does not detect.
 
 ---
 
@@ -463,7 +463,7 @@ The monitor can act on a high alert about an account, in addition to the email:
 |---|---|---|
 | Stolen session, inbox rule, mailbox forwarding, attack tool, legacy authentication, and device code, MFA change, or automation client raised to high by the source IP | Revoke sessions, or block sign-in and revoke sessions | Turn off the rule (inbox rule alerts) |
 
-Not included: admin changes (mail flow rules, roles, audit, domains; the actor is an admin, and Graph refuses changes to admins) and OAuth consents (revoking sessions does not remove an app's access). The password is never changed. Reset it by hand.
+Not included: admin changes (mail flow rules, roles, audit, domains) and OAuth consents. For an admin change, the actor is an admin, and Graph refuses changes to admins. For an OAuth consent, revoking sessions does not remove the access of the app. The password is never changed. Reset it by hand.
 
 Which account the action changes:
 
@@ -481,7 +481,7 @@ Which account the action changes:
 
 The alert email says what was done, for example "Automatic response: sessions revoked, inbox rule turned off". The same exempt list and daily limit (**Maximum account actions per day**, default 3) apply to both account actions. Turning off an inbox rule does not count toward the limit.
 
-The inbox rule is turned off, not deleted, so it stays for investigation. The monitor finds it by name, or by its external recipient. A rule that only Outlook desktop runs (client-side) is not visible to Graph; the email then says the step failed.
+The inbox rule is turned off, not deleted, so it stays for investigation. The monitor finds it by name, or by its external recipient. A rule that only Outlook desktop runs (client-side) is not visible to Graph. The email then says that the step failed.
 
 If you grant the response permissions after the monitor started (`-ResponsePermissions yes` on a rerun), the consent record for the monitor's own app sends no email and is not shown in Alerts. To limit that permission to some mailboxes, use RBAC for Applications with the role "Application MailboxSettings.ReadWrite" (as in [Limit Mail.Send](#limit-mailsend-to-the-alert-mailbox)).
 
@@ -563,7 +563,7 @@ The synthetic test does not read the Management API or proxycheck.io. The two si
 
 ### 2. Live test (real changes on a test mailbox)
 
-`scripts/live-test.ps1` makes the changes that an attacker makes, on a dedicated test mailbox, and undoes them at once. Microsoft writes an audit record for each change, and the monitor sends a real alert when the record arrives: often within minutes, sometimes 1–2 hours later. This tests the full path: unified audit log, Management API, detectors, IP lookup, and email.
+`scripts/live-test.ps1` makes the changes that an attacker makes, on a dedicated test mailbox, and undoes them at once. Microsoft writes an audit record for each change. When the record arrives, the monitor sends a real alert: often within minutes, sometimes 1–2 hours later. This tests the full path: unified audit log, Management API, detectors, IP lookup, and email.
 
 Before you start:
 
@@ -646,7 +646,7 @@ Microsoft lists this setting as not yet generally available, with no fixed date.
 
 ## Limit Mail.Send to the alert mailbox
 
-The monitor sends every email as the alert mailbox (`ADMIN_EMAIL`). With the Microsoft Graph application permission `Mail.Send`, the app could send as any mailbox in the tenant: code that runs in the Function App could send mail as your CEO. Exchange Online RBAC for Applications limits it to the alert mailbox. (RBAC for Applications replaces application access policies.)
+The monitor sends every email as the alert mailbox (`ADMIN_EMAIL`). With the Microsoft Graph application permission `Mail.Send`, the app can send as any mailbox in the tenant. Code that runs in the Function App can then send mail as your CEO. Exchange Online RBAC for Applications limits it to the alert mailbox. (RBAC for Applications replaces application access policies.)
 
 `install.ps1` does this by default (`-MailSendScope mailbox`):
 
@@ -655,9 +655,9 @@ The monitor sends every email as the alert mailbox (`ADMIN_EMAIL`). With the Mic
 3. It gives the app the Exchange role "Application Mail.Send" in that scope (role assignment `<name>-senders Mail.Send`).
 4. It checks the grant with `Test-ServicePrincipalAuthorization`. Then it removes the tenant-wide Graph `Mail.Send`, if the app has it. Graph and Exchange grants add up, so the limit has no effect while the Graph permission exists.
 
-For this step the script needs the PowerShell module ExchangeOnlineManagement (it installs it for the current user if it is missing) and an Exchange Online sign-in with Exchange Administrator or Global Administrator. The script shows a URL and a code: open the URL in any browser, also on another computer, and enter the code within 15 minutes. This works in SSH and Azure Cloud Shell. The monitor sends a "Device code sign-in" alert for this sign-in; that alert is expected. Exchange applies a change in 30 minutes to 2 hours. Until then, alert emails wait in the outbox, and the monitor sends them later.
+For this step, the script needs the PowerShell module ExchangeOnlineManagement. If the module is missing, the script installs it for the current user. The script also needs an Exchange Online sign-in with Exchange Administrator or Global Administrator. The script shows a URL and a code. Open the URL in any browser, also on another computer. Enter the code within 15 minutes. This works in SSH and Azure Cloud Shell. The monitor sends a "Device code sign-in" alert for this sign-in. That alert is expected. Exchange applies a change in 30 minutes to 2 hours. Until then, alert emails wait in the outbox, and the monitor sends them later.
 
-The app cannot change the group or the scope. So it cannot give itself the right to send as another mailbox.
+The app cannot change the group or the scope. As a result, it cannot give itself the right to send as another mailbox.
 
 The management UI shows the scope and the group under Overview > Access.
 
@@ -684,7 +684,7 @@ After `-Uninstall`, also remove the app from Exchange Online: `Remove-ServicePri
 The alert mailbox sends and receives every email. To add recipients and keep the sender, see [Send alerts to more addresses](#send-alerts-to-more-addresses-or-a-ticket-system).
 
 1. The new address must be a licensed or shared mailbox in the tenant.
-2. If Mail.Send is limited to the alert mailbox (the default; Overview > Access shows the group): add the new mailbox to the group `<name>-senders`. Microsoft 365 admin center > **Teams & groups** > **Active teams & groups** > the group > **Members**. Or Exchange admin center > **Recipients** > **Groups**. Wait 30 minutes to 2 hours: Exchange applies the change in that time.
+2. If Mail.Send is limited to the alert mailbox (the default), add the new mailbox to the group `<name>-senders`. Overview > Access shows the group. Microsoft 365 admin center > **Teams & groups** > **Active teams & groups** > the group > **Members**. Or Exchange admin center > **Recipients** > **Groups**. Wait 30 minutes to 2 hours: Exchange applies the change in that time.
 3. Management UI > Settings > Email > **Alert mailbox**. Enter the new address.
 4. Select **Save changes**, then confirm.
 
@@ -714,14 +714,14 @@ From a terminal:
 
 All checks must show `ok`. In `/api/status`, `last_complete_fetch` shows the checkpoint of each content type. It must be less than 10 minutes old. For FAILED checks, see [Troubleshooting](GETTING_STARTED.md#6-troubleshooting).
 
-Four Azure Monitor alerts send email through an action group. They do not use the app's credentials, so they work when the app cannot send email, and code that runs in the app cannot turn them off.
+Four Azure Monitor alerts send email through an action group. They do not use the app's credentials. As a result, they work when the app cannot send email. Code that runs in the app cannot turn them off.
 
 | Alert | Condition |
 |---|---|
 | `alert-<name>-no-runs` | No run completed in 1 hour |
 | `alert-<name>-errors` | 5 or more errors in 1 hour |
 | `alert-<name>-code-deployed` | Code was deployed to the monitor (a write to the `deployments` blob container) |
-| `alert-<name>-azure-change` | A change to the monitor's Azure resources: app settings, sign-in settings, identity credentials, role assignments in the resource group, the storage account, Application Insights, or the alert rules. The app stopped or deleted |
+| `alert-<name>-azure-change` | A change to the monitor's Azure resources: app settings, sign-in settings, identity credentials, role assignments in the resource group, the storage account, Application Insights, or the alert rules. Also when the app is stopped or deleted |
 
 `<name>` is the `-Name` of `install.ps1` (default `m365-ato-monitor`). The action group is `ag-<name>`. The health alerts (no runs, errors) send one email when they fire and one when they resolve. The two change alerts send one email for each change.
 
@@ -748,7 +748,7 @@ Three queues in the `processedevents` table keep alerts that cannot go out now:
 | `pendingip` | Sign-ins whose IP lookup failed (for example proxycheck.io quota used) | Each run, after the 5-minute failure cache | 26 hours (past the daily quota reset), then dropped with an error |
 | `logindigest` | Digest-mode sign-ins | Each run | Sent when the oldest is `LOGIN_DIGEST_MINUTES` old |
 
-A queued alert arrives late, not never. The errors alert reports a queue that does not empty.
+A queued alert is not lost: it arrives late. The errors alert reports a queue that does not empty.
 
 ---
 

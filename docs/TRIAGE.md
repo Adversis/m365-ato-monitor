@@ -8,8 +8,8 @@ The monitor detects attacker actions. It does not prevent them. An alert arrives
 
 Do these steps for each alert.
 
-1. Read the subject: `[M365 Alert] <SEVERITY>: <alert type> - <user>`. With a tenant name set (Settings > Email), it follows the tag: `[M365 Alert][Contoso] HIGH: ...`.
-   - `[SELF-TEST]` in the subject: the alert is a test. No action is necessary.
+1. Read the subject: `[M365 Alert] <SEVERITY>: <alert type> - <user>`. If a tenant name is set (Settings > Email), the name follows the tag: `[M365 Alert][Contoso] HIGH: ...`.
+   - If the subject has `[SELF-TEST]`, the alert is a test. No action is necessary.
    - The user in the subject depends on the alert type. For a sign-in, a mailbox rule, or forwarding, it is the affected account. For an admin-type change (roles, mail flow rules, domains, audit, mail protection, app credentials, mailbox access), it is the account that made the change. For an MFA method change, it is the account whose methods changed.
 2. Read the first sentence of the email. It says what happened.
 3. Read the colored notices:
@@ -17,7 +17,7 @@ Do these steps for each alert.
    - The "Automatic response" notice says what the monitor did. If a step "Failed", do it by hand. An automatic response does not finish the work.
    - The "other alerts for this user in the last 24 hours" notice lists the earlier alerts about the same user. Two or more alerts about one user in 24 hours are one incident. Triage them together.
 4. Read "What to do". If the first step starts with "If no one on your team made this change", confirm with the person who made it before you act.
-5. Open the "Audit record" section (compromise alerts only). Read the fields that the section for the alert type names below. The suspicious sign-in and new-country emails have no audit record. Search Microsoft Purview > Audit for it.
+5. Open the "Audit record" section (compromise alerts only). Read the fields that the section for the alert type (below) names. The suspicious sign-in and new-country emails have no audit record. For these emails, search Microsoft Purview > Audit for the record.
    The button "Open in the management UI" opens the user page. It shows all alerts about the user for 90 days, the user's sign-in countries, and the inbox rules. It has buttons to revoke sessions, block sign-in, and turn off an inbox rule.
 6. Decide:
 
@@ -31,7 +31,7 @@ Do these steps for each alert.
 
 Ask the user by phone, in person, or in a chat that you trust. Do not ask by email. An attacker can read and answer the mail of a compromised account.
 
-"Source IP: not in the record" is normal for Entra ID admin changes. Then the IP cannot make the alert high.
+"Source IP: not in the record" is normal for Entra ID admin changes. In that case, the IP cannot make the alert high.
 
 ### Other emails
 
@@ -40,7 +40,7 @@ Ask the user by phone, in person, or in a chat that you trust. Do not ask by ema
 | `[M365 Alert] Settings changed by <user>` | Someone changed a setting in the management UI | If you did not expect it, undo it in the management UI. Check who has access: Settings > Management UI access, and the Monitor.Admin role. An attacker in the UI can weaken detection |
 | `[M365 Alert] Alerts muted by <user>`, `Mute ended by <user>` | Someone added or ended a mute in the management UI | If you did not expect it, end the mute (Management UI > Mutes). Check who has access: Settings > Management UI access, and the Monitor.Admin role |
 | `[M365 Alert] Response action by <user>` | Someone revoked sessions, blocked or unblocked sign-in, or turned an inbox rule off or on in the management UI | If you did not expect it, check the user in the management UI and the History |
-| `[M365 Monitor] Weekly report` | Each Monday: the monitor ran, how many sign-ins it checked, the week's alerts, and settings that weaken protection | Read "Check these" if it is shown. If the report does not arrive on a Monday, the monitor did not run |
+| `[M365 Monitor] Weekly report` | Each Monday: the monitor ran, how many sign-ins it checked, the week's alerts, and settings that weaken protection | If "Check these" is shown, read it. If the report does not arrive on a Monday, the monitor did not run |
 | `[M365 Monitor] Starting state` | The onboarding scan finished: past audit records, inbox rules of all mailboxes, and manual checks | Triage each item as an alert. Do the manual checks one time |
 | `[M365 Monitor] Monthly report` | The 1st of each month: counts for 30 days, and settings that weaken protection | No action unless it shows items to review |
 | Azure Monitor `alert-<name>-no-runs` or `alert-<name>-errors` | The monitor stopped, or errors repeat | Run `./install.ps1 -Verify`. See [Getting Started: Troubleshooting](GETTING_STARTED.md#6-troubleshooting) |
@@ -51,7 +51,7 @@ Do these steps in this order for a real or unconfirmed alert. If the attacker is
 
 1. **Revoke sessions.**
    - Management UI > Users > the user > **Revoke sessions** (needs `User.RevokeSessions.All`). Or: Entra admin center > Users > the user > **Revoke sessions**. Or: Microsoft 365 admin center > Users > Active users > the user > **Sign out of all sessions**.
-   - This stops refresh tokens and browser sessions, a stolen session cookie too. Apps that are signed in already stop within about 15 minutes (Outlook, OneDrive, and Office apps: continuous access evaluation) or when their access token expires (60 to 90 minutes: web apps, other clients). See [How fast a revoke or block applies](HOW_TO.md#how-fast-a-revoke-or-block-applies).
+   - This stops refresh tokens and browser sessions, also a stolen session cookie. Apps that are signed in already stop within about 15 minutes (Outlook, OneDrive, and Office apps: continuous access evaluation) or when their access token expires (60 to 90 minutes: web apps, other clients). See [How fast a revoke or block applies](HOW_TO.md#how-fast-a-revoke-or-block-applies).
    - A password reset alone does not end a stolen session.
 2. **Reset the password.**
    - Microsoft 365 admin center > Users > Active users > the user > **Reset password**.
@@ -61,7 +61,7 @@ Do these steps in this order for a real or unconfirmed alert. If the attacker is
 3. **Check the MFA methods.**
    - Entra admin center > Users > the user > **Authentication methods**.
    - Ask the user about each method. Delete each method that the user does not know.
-   - Do this step immediately after step 2. With self-service password reset, an attacker's method can reset the password again.
+   - Do this step immediately after step 2. If self-service password reset is on, an attacker's method can reset the password again.
    - The unified audit log does not show passkey, FIDO2, and Windows Hello registrations. The monitor cannot see them. Read the list.
    - Also open Entra admin center > Users > the user > **Devices**. Delete devices that the user does not know.
 4. **Check inbox rules and forwarding.**
@@ -80,27 +80,32 @@ Do these steps in this order for a real or unconfirmed alert. If the attacker is
    - Record the details of a rule before you remove it.
    - Microsoft Graph cannot see a rule that only Outlook desktop runs. Check Outlook desktop on the user's computer: File > Manage Rules & Alerts.
 5. **Check app consents.**
-   - Entra admin center > Enterprise applications > All applications. Look for apps that you do not know, mostly new ones.
+   - Entra admin center > Enterprise applications > All applications. Look for apps that you do not know, especially new ones.
    - For each such app: Permissions > **User consent**. Find out if the user gave consent.
    - Remove the access of an app that you do not know: Permissions, or delete the app (Properties > Delete).
-   - Revoking sessions does not remove an app's access. A password reset does not remove it either.
+   - Revoking sessions and a password reset do not remove an app's access.
 6. **Check mail sent from the account.**
    - Exchange admin center > Mail flow > **Message trace**. Search for messages from the user since the first suspicious event.
    - Look for many recipients, external recipients, one subject sent to many people, and replies in threads about payments.
    - Attackers delete the mail that they send. Check Sent Items and Deleted Items with the user.
    - If phishing went out, warn the recipients by phone or from another account.
-   - If Microsoft blocked the account from sending: Microsoft Defender portal > Email & collaboration > Review > **Restricted entities**.
+   - If Microsoft blocked the account from sending, go to Microsoft Defender portal > Email & collaboration > Review > **Restricted entities**.
 7. **Check sign-ins.**
    - Entra admin center > Users > the user > **Sign-in logs**. Without Entra ID P1, the portal keeps 7 days. With P1, it keeps 30 days and shows Conditional Access results.
    - For older sign-ins: Microsoft Purview > Audit. Enter the user in **Users** and `UserLoggedIn`, `UserLoginFailed` in **Activities - operation names**. Audit (Standard) keeps records for 180 days.
    - Find the first sign-in that the user did not make. Write down its IP, country, app (`ObjectId`), and user agent. Search for the same IP in the sign-ins of other users.
-   - With Entra ID P2: Entra admin center > ID Protection > **Risky users** and **Risky sign-ins**.
+   - If you have Entra ID P2, read Entra admin center > ID Protection > **Risky users** and **Risky sign-ins**.
 8. **Block sign-in, if necessary.**
-   - Block when the attacker is still active, an admin account is involved, you cannot reach the user about a high alert, mail goes to many recipients, or you need time for steps 2–7.
+   - Block sign-in if one of these is true:
+     - The attacker is still active.
+     - An admin account is involved.
+     - You cannot reach the user about a high alert.
+     - Mail goes to many recipients.
+     - You need time for steps 2–7.
    - Management UI > Users > the user > **Block sign-in** (also revokes sessions). Or: Entra admin center > Users > the user > Edit properties > Settings > clear **Account enabled**. Or: Microsoft 365 admin center > Users > Active users > the user > **Block sign-in**.
    - For an account that is synced from Active Directory, disable it in Active Directory.
    - Revoke sessions again after the block.
-   - To enable the account again: Management UI > Users > the user > **Unblock sign-in**, select **Account enabled**, or run `az ad user update --id <upn> --account-enabled true`.
+   - To enable the account again: Management UI > Users > the user > **Unblock sign-in**. Or: Entra admin center > Users > the user > Edit properties > Settings > select **Account enabled**. Or run `az ad user update --id <upn> --account-enabled true`.
 
 After containment, watch for new alerts about the user for some days. Tell the user what happened and how the attacker got in.
 
@@ -131,7 +136,7 @@ Every compromise alert, except session reuse and mail access, becomes high if it
 | [`mail_protection_weakened`](#mail_protection_weakened) | Mail protection | High or medium | Yes | No |
 
 - **Confirm first:** the email asks you to confirm with the person who made the change before you treat the account as compromised.
-- **Automatic response:** off by default. With `COMPROMISE_ACTION` set, a high alert of this type revokes sessions (or blocks sign-in and revokes sessions) for the affected account: the account that signed in, or the account that was changed if the same account made the change. A change that one account made to another gets no action. Exempt accounts, the alert mailbox, and admin accounts are not changed. At most 3 account actions per day (default).
+- **Automatic response:** off by default. If `COMPROMISE_ACTION` is set, a high alert of this type revokes sessions (or blocks sign-in and revokes sessions) for the affected account. The affected account is the account that signed in, or the account that was changed if the same account made the change. A change that one account made to another gets no action. The monitor does not change exempt accounts, the alert mailbox, or admin accounts. The default limit is 3 account actions per day.
 
 <a id="suspicious_signin"></a>
 ## suspicious_signin — Suspicious sign-in
@@ -158,10 +163,10 @@ Subject: `[M365 Alert] <LOW|MEDIUM|HIGH>: Suspicious sign-in - <user> from <IP>,
 
 **If real.**
 - `success`: [contain the account](#contain-an-account).
-- `correct password`: reset the password now and check the MFA methods. Ask the user about MFA prompts that they did not start. Tell them to deny such prompts.
-- `failed` with a wrong password: the attacker did not get in. Make sure that every user has MFA (Security Defaults or Conditional Access). Watch for more attempts.
+- `correct password`: reset the password now. Check the MFA methods. Ask the user about MFA prompts that they did not start. Tell them to deny such prompts.
+- `failed` with a wrong password: the attacker did not get in. Check that every user has MFA (Security Defaults or Conditional Access). Watch for more attempts.
 
-**If benign.** For a company VPN or office with fixed IPs, add the IPs to **Allowed IPs and ranges**. For a mobile carrier, add its ASN to **Allowed networks (ASNs)**. For too many emails, use digest mode or change **Which suspicious sign-ins send email**. Each option hides something: see [Options for expected alerts](#options-for-expected-alerts).
+**If benign.** For a company VPN or office with fixed IPs, add the IPs to **Allowed IPs and ranges**. For a mobile carrier, add its ASN to **Allowed networks (ASNs)**. If you get too many emails, use digest mode or change **Which suspicious sign-ins send email**. Each option hides something: see [Options for expected alerts](#options-for-expected-alerts).
 
 **Severity.** The badge shows the IP confidence, not the result. High: Tor, SOCKS, compromised server. Medium: VPN, hosting, inference engine, or risk 66 or more. Low: another proxy, or risk at or above the threshold. A `success` or `correct password` result needs action at each level.
 
@@ -186,7 +191,7 @@ Subject: `[M365 Alert] HIGH: Sign-in from new country <CC> - <user>, <result>`.
 
 **If real.** `correct password`: reset the password now. The attacker knows it. `success`: [contain the account](#contain-an-account).
 
-**Automatic response.** With `ANOMALY_ACTION` set, the monitor revokes sessions, or blocks sign-in and revokes sessions, after a successful sign-in. It does not act during the learning period, for a sign-in that did not complete, for an exempt account, or after the daily limit. The notice in the email says what it did and why it did nothing. If it blocked a legitimate user, enable the account: Entra admin center > Users > the user > Edit properties > **Account enabled**.
+**Automatic response.** With `ANOMALY_ACTION` set, the monitor revokes sessions, or blocks sign-in and revokes sessions, after a successful sign-in. It does not act during the learning period, for a sign-in that did not complete, for an exempt account, or after the daily limit. The notice in the email says what it did, or why it did nothing. If it blocked a legitimate user, enable the account: Entra admin center > Users > the user > Edit properties > **Account enabled**.
 
 **If benign.** Approve the country for the user: use the link in the email, or Management UI > Countries. A country also becomes usual after successful sign-ins on 3 different days. For countries where all users work, set **Home countries**.
 
@@ -197,7 +202,7 @@ Subject: `[M365 Alert] HIGH: Sign-in from new country <CC> - <user>, <result>`.
 
 Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used from a second country or a risky IP".
 
-**What it means.** One Entra session (one session ID) was used from one country, then from another. Or the session started on a normal network, and then a mailbox record in the same country came from a VPN, proxy, hosting, or Tor IP that did not sign in as the user: the session token was used without a new sign-in. The usual cause is a stolen session cookie (AiTM phishing) or a stolen token (infostealer).
+**What it means.** One Entra session (one session ID) was used from one country, then from another. Or the session started on a normal network, and then a mailbox record in the same country came from a VPN, proxy, hosting, or Tor IP. That IP did not sign in as the user. The session token was used without a new sign-in. The usual cause is a stolen session cookie (AiTM phishing) or a stolen token (infostealer).
 
 **How to check it is real.**
 - The first sentence names both IPs and the second network. For two countries, it also names both countries and the minutes between them. The notice says where the session started.
@@ -209,7 +214,7 @@ Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used
 
 **Common benign causes.** The user turned a VPN on or off while the browser was open. A company proxy or web gateway with exits in other countries. Travel. Wrong geolocation on a mobile network.
 
-**If real.** [Contain the account](#contain-an-account). Revoke sessions first: that ends the stolen session. A password reset alone does not. Find the phishing email, and find who else got it: Exchange admin center > Mail flow > Message trace.
+**If real.** [Contain the account](#contain-an-account). Revoke sessions first: that ends the stolen session. A password reset alone does not. Find the phishing email. Find who else got it: Exchange admin center > Mail flow > Message trace.
 
 **If benign.** Add fixed company VPN or proxy IPs to **Allowed IPs and ranges**: the session check ignores them. Approving a country for the user makes the alert medium. It does not stop it.
 
@@ -220,7 +225,7 @@ Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used
 
 Subject: `[M365 Alert] MEDIUM: Mail access from a risky IP - <user>` (or HIGH). Email title: "Mail read or sent from a risky IP".
 
-**What it means.** Mail of the user was read (`MailItemsAccessed`) or sent (`Send`) from an IP that is a VPN, proxy, hosting, or Tor address, or that is in a new country for the user. No sign-in of the user came from this IP in the last 7 days. A stolen session cookie or refresh token gives that pattern: the attacker reads and sends mail from their own network, and a token refresh writes no sign-in record.
+**What it means.** Mail of the user was read (`MailItemsAccessed`) or sent (`Send`) from an IP that is a VPN, proxy, hosting, or Tor address, or that is in a new country for the user. No sign-in of the user came from this IP in the last 7 days. A stolen session cookie or refresh token gives that pattern. The attacker reads and sends mail from their own network. A token refresh writes no sign-in record.
 
 **How to check it is real.**
 - The first sentence gives the count of reads and sends, the IP, its network, and the clients (for example `Client=OWA`, `Client=MSExchangeRPC`). It lists the subjects of sent messages.
@@ -231,11 +236,11 @@ Subject: `[M365 Alert] MEDIUM: Mail access from a risky IP - <user>` (or HIGH). 
 
 **Common benign causes.** A VPN that the user turned on after they signed in. Outlook mobile on a VPN or a mobile network that a lookup service classifies as hosting. A travel router or hotel network.
 
-**If real.** [Contain the account](#contain-an-account). Revoke sessions first: that ends the stolen session or token. Tell the recipients of the sent mail that it is not genuine, and look for payment or bank detail changes in the threads.
+**If real.** [Contain the account](#contain-an-account). Revoke sessions first: that ends the stolen session or token. Tell the recipients of the sent mail that it is not genuine. Look for payment or bank detail changes in the threads.
 
 **If benign.** Add the company VPN to **Allowed networks (ASNs)** or **Allowed IPs and ranges**. Mute a medium alert for one user for some days ([Mutes](HOW_TO.md#mute-an-expected-alert)).
 
-**Severity.** High if the IP is Tor or a similar anonymizer, or if mail was sent or a folder was downloaded from a VPN, proxy, or hosting IP. Else medium. One alert per user, IP, and day. Works only if the tenant logs mail access: Management UI > Overview > **Mail access records**.
+**Severity.** High if the IP is Tor or a similar anonymizer, or if mail was sent or a folder was downloaded from a VPN, proxy, or hosting IP. Otherwise medium. One alert per user, IP, and day. The check works only if the tenant logs mail access: Management UI > Overview > **Mail access records**.
 
 <a id="legacy_auth"></a>
 ## legacy_auth — Legacy auth sign-in
@@ -275,7 +280,7 @@ Subject: `[M365 Alert] MEDIUM: Device code sign-in - <user>`. Email title: "Sign
 
 **Common benign causes.** Azure CLI or PowerShell with a device code sign-in. A Teams Rooms or meeting room device. A smart TV or a shared device. The manual test in [How-To: Test the alerts](HOW_TO.md#test-the-alerts).
 
-**If real.** [Contain the account](#contain-an-account). Revoke sessions first: the attacker has tokens, not the password. Delete registered devices that the user does not know. With Entra ID P1, block the device code flow in a Conditional Access policy for users who do not need it.
+**If real.** [Contain the account](#contain-an-account). Revoke sessions first: the attacker has tokens, not the password. Delete registered devices that the user does not know. If you have Entra ID P1, block the device code flow in a Conditional Access policy for users who do not need it.
 
 **If benign.** A one-time sign-in needs no change. For a device that signs in often, see [Options](#options-for-expected-alerts).
 
@@ -286,7 +291,7 @@ Subject: `[M365 Alert] MEDIUM: Device code sign-in - <user>`. Email title: "Sign
 
 Subject: `[M365 Alert] HIGH: Attack tool sign-in - <user>`. Email title: "Sign-in with an attack tool".
 
-**What it means.** The user agent of a sign-in names an attack tool: AADInternals, ROADtools, GraphRunner, Gophish, or Evilginx (or an entry that you added). A correct password stopped by MFA or Conditional Access counts too. A failed sign-in with a wrong password sends email only if **Email failed sign-ins** is on; otherwise it is in Alerts with the email status "alert type off".
+**What it means.** The user agent of a sign-in names an attack tool: AADInternals, ROADtools, GraphRunner, Gophish, or Evilginx (or an entry that you added). A correct password stopped by MFA or Conditional Access counts too. A failed sign-in with a wrong password sends email only if **Email failed sign-ins** is on. If it is off, the sign-in is in Alerts with the email status "alert type off".
 
 **How to check it is real.**
 - Fields: `Operation` (`UserLoggedIn` is a success, `UserLoginFailed` is a failure), `ExtendedProperties` (`UserAgent`), `ClientIP`, `ErrorNumber` or `LogonError`, `ObjectId`.
@@ -296,7 +301,7 @@ Subject: `[M365 Alert] HIGH: Attack tool sign-in - <user>`. Email title: "Sign-i
 
 **Common benign causes.** An authorized penetration test. An admin who uses AADInternals or ROADtools for troubleshooting. The live test (`scripts/live-test.ps1`, test AttackToolSignIn).
 
-**If real.** A success or a correct password: [contain the account](#contain-an-account). A failed sign-in with a wrong password: someone attacks the account but does not have the password. Do the steps in the email. Make sure that the user has MFA.
+**If real.** A success or a correct password: [contain the account](#contain-an-account). A failed sign-in with a wrong password: someone attacks the account but does not have the password. Do the steps in the email. Check that the user has MFA.
 
 **If benign.** Confirm the test with the person who ran it. No change is necessary.
 
@@ -334,13 +339,24 @@ Subject: `[M365 Alert] HIGH: Inbox rule - <user>` (or MEDIUM). Email title: "Sus
 - Rule details in `Parameters`: `Name` or `Identity`, `ForwardTo`, `ForwardAsAttachmentTo`, `RedirectTo`, `DeleteMessage`, `SoftDeleteMessage`, `MoveToFolder`, `MarkAsRead`, and the conditions (`SubjectContainsWords`, `SubjectOrBodyContainsWords`, `FromAddressContainsWords`).
 - For `UpdateInboxRules`, read `OperationProperties`: `RuleName`, `RuleOperation`, `RuleActions`, `Actions`, `ServerRule`.
 - `ClientInfoString`: `Client=OWA` is Outlook on the web. `Client=MSExchangeRPC` is Outlook desktop. `Client=WebServices;<user agent>` is EWS (a script or an app).
-- Compare: a name such as `.`, `..`, or one letter; a forward to a free mail service; a condition on words such as invoice, payment, or password; the IP against the user's sign-ins; the time against other alerts for the user.
+- Compare these items:
+  - A name such as `.`, `..`, or one letter.
+  - A forward to a free mail service.
+  - A condition on words such as invoice, payment, or password.
+  - The IP against the user's sign-ins.
+  - The time against other alerts for the user.
 - If `UserId` is not the mailbox owner, an admin or a delegate made the rule.
 - A recipient shown as "name (directory)" is an X.500 address: a mailbox, group, or contact in your directory. Outlook writes it when the person picks the recipient from the address book. The monitor flags it as unverified because it cannot resolve the final address. A contact can point outside your organization. Check it in Microsoft 365 admin center > Contacts. Confirm the destination and the rule with the user before you take action.
 - The alert lists what the rule does (Actions) and for which mail (Conditions). For a rule that the onboarding scan found, the email has no audit record: open the rule on the user page (Management UI > Users > the user > Inbox rules).
 - Look next: `Get-InboxRule -Mailbox <upn> -IncludeHidden`. Microsoft Purview > Audit: the user's `UserLoggedIn` records in the hours before the rule.
 
-A rule that only deletes mail (no forward, no hidden folder, no payment or security words) sends email only with context: another alert for the user in the 7 days before, a rule IP that is flagged, new for the user, or not checked, or a sign-in from a new network in the 24 hours before. The alert names the context. Without it, the rule is in the alert list as "Known sign-in", with no email.
+A rule that only deletes mail (no forward, no hidden folder, no payment or security words) sends email only with one of these contexts:
+
+- Another alert for the user in the 7 days before.
+- A rule IP that is flagged, new for the user, or not checked.
+- A sign-in from a new network in the 24 hours before.
+
+The alert names the context. Without a context, the rule is in the alert list as "Known sign-in", with no email.
 
 **Common benign causes.** The user moves newsletters to RSS Feeds or deletes mail from one sender. The user forwards to a personal address (a policy problem and a data leak, but not an attack). A rule for an assistant. A migration or archive tool (EWS).
 
@@ -352,7 +368,17 @@ A rule that only deletes mail (no forward, no hidden folder, no payment or secur
 
 **If benign.** The tenant's verified domains are internal. If the forward address is in a domain outside the tenant that belongs to your organization, add the domain to **Internal mail domains**. If the monitor turned off a legitimate rule, turn it on again in Outlook. For a confirmed rule that alerts again, see [Options](#options-for-expected-alerts).
 
-**Severity.** High: forwards or redirects to an external address; deletes; moves to a hidden folder (Deleted Items, RSS Feeds, RSS Subscriptions, Junk Email, Conversation History, Calendar); or was made with an attack tool or automation library. Medium: a name with no letters or digits; a 1–2 character name on a rule that hides mail; a listed keyword with mark-as-read, move, or delete.
+**Severity.**
+
+- High:
+  - Forwards or redirects to an external address.
+  - Deletes.
+  - Moves to a hidden folder (Deleted Items, RSS Feeds, RSS Subscriptions, Junk Email, Conversation History, Calendar).
+  - Was made with an attack tool or automation library.
+- Medium:
+  - A name with no letters or digits.
+  - A 1–2 character name on a rule that hides mail.
+  - A listed keyword with mark-as-read, move, or delete.
 
 <a id="mailbox_forwarding"></a>
 ## mailbox_forwarding — Mailbox forwarding
@@ -407,13 +433,13 @@ Subject: `[M365 Alert] HIGH: OAuth consent - <user>`. Email title: "Risky OAuth 
 **What it means.** A user or an admin gave an app a high-risk permission, for example `Mail.Read`, `Mail.Send`, `EWS.AccessAsUser.All`, `full_access_as_app`, or `Files.ReadWrite.All`. In consent phishing, the attacker's app gets access to the mailbox without the password. The access stays after a password reset.
 
 **How to check it is real.**
-- Fields: `Operation` (`Consent to application.`, `Add delegated permission grant.`, `Add OAuth2PermissionGrant.`, `Add app role assignment to service principal.`), `UserId` (who gave consent), `Target` (type 1 is the app name), `ModifiedProperties` (`ConsentAction.Permissions` or `AppRole.Value`: the scopes; `ServicePrincipal.DisplayName`).
+- Fields: `Operation` (`Consent to application.`, `Add delegated permission grant.`, `Add OAuth2PermissionGrant.`, `Add app role assignment to service principal.`), `UserId` (who gave consent), `Target` (type 1 is the app name), `ModifiedProperties` (`ConsentAction.Permissions` or `AppRole.Value` for the scopes, and `ServicePrincipal.DisplayName`).
 - If the record has `ConsentContext.IsAdminConsent` with `True`, an admin gave consent for all users.
 - Open the app: Entra admin center > Enterprise applications > the app. Read Properties (publisher, creation date) and Permissions (User consent, Admin consent).
 - Compare: Does your organization use this app? Is its name close to the name of a known app? Did the user get a link by email just before?
 - Look next: Microsoft Purview > Audit, `Consent to application.`, for other users and the same app.
 
-**Common benign causes.** An admin approves a known business app (backup, mail signatures, CRM, scheduling). A user connects a mail or calendar app. A permission that `install.ps1` grants to the monitor's own app (for example `Mail.Send` or `MailboxSettings.ReadWrite`) is not emailed and not shown in the management UI or the reports. The monitor knows it by the app ID, the roles that the install's choices give, and, for a run with other choices than now, the account and the time of that run (`INSTALL_GRANTS`). A grant of another risky scope to the monitor's app still sends this alert: investigate it.
+**Common benign causes.** An admin approves a known business app (backup, mail signatures, CRM, scheduling). A user connects a mail or calendar app. A permission that `install.ps1` grants to the monitor's own app (for example `Mail.Send` or `MailboxSettings.ReadWrite`) is not emailed and not shown in the management UI or the reports. The monitor knows such a grant by the app ID and the roles that the install's choices give. For an earlier run with other choices than now, it also uses the account and the time of that run (`INSTALL_GRANTS`). A grant of another risky scope to the monitor's app still sends this alert: investigate it.
 
 **If real.** Remove the app's access: Permissions, or delete the app if you do not know it. Find what the app read: Microsoft Purview > Audit. Check the other users who gave consent. Restrict user consent: Entra admin center > Enterprise applications > Consent and permissions > User consent settings.
 
@@ -426,7 +452,13 @@ Subject: `[M365 Alert] HIGH: OAuth consent - <user>`. Email title: "Risky OAuth 
 
 Subject: `[M365 Alert] MEDIUM: MFA change - <user>` (or HIGH). Email title: "MFA changed".
 
-**What it means.** One of these: an MFA method was added or changed on an account that already had MFA; per-user MFA was turned off; tenant MFA settings were changed (for example trusted IPs that skip MFA). An attacker adds a method to keep access after a password reset.
+**What it means.** One of these changes occurred:
+
+- An MFA method was added or changed on an account that already had MFA.
+- Per-user MFA was turned off.
+- Tenant MFA settings were changed (for example, trusted IPs that skip MFA).
+
+An attacker adds a method to keep access after a password reset.
 
 **How to check it is real.**
 - The user in the subject is the account whose MFA changed. For tenant MFA settings, it is the account that made the change.
@@ -442,7 +474,18 @@ Subject: `[M365 Alert] MEDIUM: MFA change - <user>` (or HIGH). Email title: "MFA
 
 **If benign.** A one-time change needs no tuning.
 
-**Severity.** Medium. High: per-user MFA turned off, the source IP is flagged or new for the user, or the user had another alert in the 7 days before. A method replaced, an Authenticator device replaced, or the default method changed counts as a change too. A first MFA registration and a method removed do not cause an alert. All methods removed (an admin's "Require re-register MFA") is listed in Alerts as "Listed, no email": the next sign-in registers a new method, so check that the user did it. A method added by the user or by an admin sends no email when the sign-in of the person who made the change (in the hour before) came from a network that they used before, and neither the user nor the admin had another alert in 7 days: it shows in the alert list as "Known sign-in". The alert says which case applies: another alert, a sign-in from a new network (its IP), or no sign-in seen. After an install or the update that adds this, the monitor loads 30 days of past sign-ins from the audit log, once. While a user's network history is shorter than 14 days, a change sends no email unless there was another alert ("Known sign-in", the reason says so). The alert names the methods before and after the change, marks the default method, and lists changed phone numbers, email, and Authenticator devices. Signs of an attacker: a new phone number or email that the user does not know, the default changed to a text message or voice call, or an Authenticator method removed. The monitor cannot see passkey, FIDO2, and Windows Hello registrations.
+**Severity.** Medium. High: per-user MFA turned off, the source IP is flagged or new for the user, or the user had another alert in the 7 days before.
+
+A method replaced, an Authenticator device replaced, or the default method changed counts as a change too. A first MFA registration and a method removed do not cause an alert. All methods removed (an admin's "Require re-register MFA") is listed in Alerts as "Listed, no email". The next sign-in registers a new method, so check that the user did it.
+
+A method added by the user or by an admin sends no email if both of these are true:
+
+- The sign-in of the person who made the change (in the hour before) came from a network that they used before.
+- Neither the user nor the admin had another alert in 7 days.
+
+The change then shows in the alert list as "Known sign-in". The alert says which case applies: another alert, a sign-in from a new network (its IP), or no sign-in seen. After an install or the update that adds this, the monitor loads 30 days of past sign-ins from the audit log, once. While a user's network history is shorter than 14 days, a change sends no email unless there was another alert ("Known sign-in", the reason says so).
+
+The alert names the methods before and after the change, marks the default method, and lists changed phone numbers, email, and Authenticator devices. Signs of an attacker: a new phone number or email that the user does not know, the default changed to a text message or voice call, or an Authenticator method removed. The monitor cannot see passkey, FIDO2, and Windows Hello registrations.
 
 <a id="admin_role"></a>
 ## admin_role — Admin role
@@ -523,7 +566,7 @@ Subject: `[M365 Alert] HIGH: Audit off - <user>`. Email title: "Audit logging tu
 
 **If real.** Turn auditing on again (the email gives the commands). Contain the admin account. [Escalate](#when-to-escalate).
 
-**If benign.** Turn auditing on again, unless a documented reason exists. A mute does not hide this alert.
+**If benign.** If no documented reason exists, turn auditing on again. A mute does not hide this alert.
 
 **Severity.** Always high. If no audit content arrives for 48 hours, the monitor logs an error and the Azure Monitor errors alert sends an email.
 
@@ -546,7 +589,15 @@ Subject: `[M365 Alert] HIGH: Mail flow rule - <user>` (or MEDIUM). Email title: 
 
 **If benign.** If the target is in another domain of your organization, add the domain to **Internal mail domains**.
 
-**Severity.** High: an external copy, blind copy, redirect, or added recipient; delete; route through a connector. Medium: skip spam filtering; any new rule (only with **Alert on every new mail flow rule**).
+**Severity.**
+
+- High:
+  - An external copy, blind copy, redirect, or added recipient.
+  - Delete.
+  - Route through a connector.
+- Medium:
+  - Skip spam filtering.
+  - Any new rule (only with **Alert on every new mail flow rule**).
 
 <a id="mail_protection_weakened"></a>
 ## mail_protection_weakened — Mail protection
@@ -610,7 +661,7 @@ Who to involve:
 - Your IT or security lead, and your management.
 - An incident response provider. If you have cyber insurance, call the carrier's incident line first. Many policies require this, and the carrier can assign a provider. Read your policy.
 - Your bank, immediately, if money went to an attacker's account.
-- Microsoft support: Microsoft 365 admin center > Support > Help & support. For example for a federation backdoor or a locked-out Global Administrator.
+- Microsoft support: Microsoft 365 admin center > Support > Help & support. For example, for a federation backdoor or a locked-out Global Administrator.
 - Your legal counsel, for duties to notify. This guide does not give legal advice.
 - The police or your national cybercrime reporting service, for fraud.
 
@@ -631,7 +682,7 @@ These rules apply when you help a person with an alert. The rules in [AGENTS.md]
 4. When in doubt, recommend containment. Revoking sessions costs the user one sign-in.
 5. Do not weaken detection on your own (AGENTS.md rule 4). This includes allowlists, home countries, approved countries, alert types off, mutes, detection lists, and the sign-in email level. Make such a change only when the person asks. Before the change, say what it hides (see [Options for expected alerts](#options-for-expected-alerts)).
 6. Get a yes before each command or management UI action that changes the tenant (AGENTS.md rule 1). This includes Revoke sessions, Block sign-in, Unblock sign-in, and Turn off or Turn on an inbox rule in the management UI. Examples of commands: `Revoke-MgUserSignInSession`, `Update-MgUser -AccountEnabled`, `az ad user update`, `Remove-InboxRule`, `Disable-InboxRule`, `Set-Mailbox`, `Remove-MailboxPermission`, `Remove-MailboxFolderPermission`, `Remove-MgServicePrincipal`, `Set-AdminAuditLogConfig`. Read-only commands (`Get-InboxRule`, `Get-Mailbox`, `Get-MailboxPermission`, `Get-AdminAuditLogConfig`, `Get-MgUser`, `Search-UnifiedAuditLog`) need no yes.
-7. Keep evidence. Suggest that the person turns off a rule or app before they delete it, and records its details first.
+7. Keep evidence. Suggest that the person records the details of a rule or app first. Then suggest that they turn it off before they delete it.
 8. Tell the person to contact the user by phone or in person, not by email.
 9. Do not claim that the monitor did something that it did not do. Read the "Automatic response" notice. The monitor never changes passwords. It does not remove MFA methods, forwarding, permissions, or apps.
 10. Remember the delay: the event can have happened some minutes to 1–2 hours (sometimes more) before the email. Compare the time in the record with the time of the email.

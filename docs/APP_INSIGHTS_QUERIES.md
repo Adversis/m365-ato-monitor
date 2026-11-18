@@ -133,7 +133,7 @@ A "Coverage gap" row gives an interval that was not fully processed. Search the 
 
 ## Errors
 
-Or from a terminal, with your Azure CLI sign-in (read only): `./scripts/errors.ps1` (`-Hours 72`, `-Warnings`, `-Full`, `-Tenant contoso.com`). It counts the errors by message, then lists the newest. It hides "Exception encountered while listening to EventStream": the Functions host logs it when Azure stops an instance (`-All` shows it). `-Kql '<query>'` runs any query on this page.
+You can also run `./scripts/errors.ps1` (`-Hours 72`, `-Warnings`, `-Full`, `-Tenant contoso.com`) from a terminal with your Azure CLI sign-in (read only). The script counts the errors by message, then lists the newest. It hides "Exception encountered while listening to EventStream". The Functions host logs this message when Azure stops an instance. `-All` shows it. `-Kql '<query>'` runs any query on this page.
 
 ```kql
 traces
