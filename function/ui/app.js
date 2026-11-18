@@ -703,24 +703,29 @@ function failedSigninsCard() {
       "IPs, or many accounts from one network, is password spraying. Make sure that these accounts have MFA." }));
 }
 
+// An address that breaks only after "@" or before a dot, not in the middle of a word.
+function address(text) {
+  return h("span", { class: "address" }, String(text).split(/(?<=@)|(?=\.)/).flatMap((p, i) => (i ? [h("wbr"), p] : [p])));
+}
+
 function addressList(list) {
-  return list && list.length ? h("span", { class: "chips" }, list.map((a) => h("span", { class: "chip", text: a }))) : "none";
+  return list && list.length ? h("span", { class: "chips" }, list.map((a) => h("span", { class: "chip", title: a, text: a }))) : "none";
 }
 
 function accessCard() {
   const health = state.health || {};
   const roles = health.graph_roles;
   const app = state.app;
-  return h("section", { class: "card", "aria-labelledby": "card-access" },
+  return h("section", { class: "card card-wide", "aria-labelledby": "card-access" },
     h("div", { class: "card-head" }, h("h2", { id: "card-access", text: "Access" })),
     facts([
-      ["Alert mailbox", app.admin_email || "not set", sub("Sends every email. Gets every alert and report.")],
+      ["Alert mailbox", app.admin_email ? address(app.admin_email) : "not set", sub("Sends every email. Gets every alert and report.")],
       ["Extra alert recipients", addressList(app.alert_recipients)],
       ["Extra report recipients", addressList(app.report_recipients)],
       ["Tenant label", app.tenant_label
         ? [app.tenant_label, sub(`Subjects start with [M365 Alert][${app.tenant_label}].`)] : "none"],
       ["Graph permissions", roles === null || roles === undefined ? "unknown (no token)"
-        : roles.length ? h("span", { class: "chips" }, roles.map((r) => h("span", { class: "chip", text: r }))) : "none"],
+        : roles.length ? h("span", { class: "chips" }, roles.map((r) => h("span", { class: "chip", title: r, text: r }))) : "none"],
       ["Mail.Send scope", state.app.mail_send_scope === "mailbox"
         ? [pill("ok", "Alert mailbox only"), h("span", { class: "sub", text: app.mail_send_group
             ? `The app can send only as a member of the Exchange group ${app.mail_send_group}. To use another alert mailbox, add it to this group (Microsoft 365 admin center > Teams & groups), wait up to 2 hours, then change it in Settings > Email.`
@@ -976,10 +981,11 @@ function renderOverview() {
     h("div", { class: "stack" },
       statusSummary(),
       alertsCard(),
-      h("div", { class: "grid" }, monitorCard(), countriesCard(), failedSigninsCard(), accessCard()),
+      // Monitor beside the two sign-in cards; no card stretches to the height of another.
+      h("div", { class: "grid grid-pair" }, monitorCard(), h("div", { class: "stack" }, countriesCard(), failedSigninsCard())),
       emailsCard()),
     h("h2", { class: "section-title", text: "Tools" }),
-    h("div", { class: "stack" }, testAlertsCard(), checksCard(), scanCard()));
+    h("div", { class: "stack" }, testAlertsCard(), checksCard(), accessCard(), scanCard()));
 }
 
 async function runChecks(e) {
