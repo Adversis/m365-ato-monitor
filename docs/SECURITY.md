@@ -2,6 +2,54 @@
 
 Permissions, secrets, protections, and known limitations.
 
+## Architecture and controls
+
+Everything runs in one resource group in your Azure subscription. Arrows show who calls whom, with the permission or control on the call.
+
+```mermaid
+flowchart LR
+  admin(["Admin browser"])
+  subgraph tenant["Microsoft 365 tenant"]
+    audit["Unified audit log"]
+    entra["Entra ID: app registration<br>no client secret"]
+    mail["Alert mailbox"]
+  end
+  subgraph rg["Your Azure subscription: one resource group"]
+    func["Function App<br>HTTPS only, no SCM/FTP passwords"]
+    mi["User-assigned<br>managed identity"]
+    st["Storage account<br>no shared key, no public blobs"]
+    ai["Application Insights<br>Entra ID only, 90 days"]
+    mon["Azure Monitor alerts<br>no runs, code deployed, Azure change"]
+  end
+  pc["proxycheck.io"]
+  gh["GitHub API"]
+
+  admin -->|"Entra sign-in, then role check<br>Monitor.Admin, listed users or roles"| func
+  func --- mi
+  mi -->|"federated credential"| entra
+  func -->|"ActivityFeed.Read, AuditLogsQuery.Read.All"| audit
+  func -->|"send as the alert mailbox only"| mail
+  func -.->|"optional: revoke, block, rule off"| entra
+  func -->|"Azure RBAC, managed identity"| st
+  func -->|"logs"| ai
+  ai --> mon
+  mon -->|"email, outside the app"| mail
+  func -->|"IP addresses only"| pc
+  func -->|"latest release, no tenant data"| gh
+```
+
+| Control | What it stops | Where |
+|---|---|---|
+| Managed identity with a federated credential | A stolen or expired secret: there is none | `install.ps1`, `identity.py` |
+| Mail.Send scoped to one Exchange group (default) | Mail sent as any other mailbox | [Limit Mail.Send](HOW_TO.md#limit-mailsend-to-the-alert-mailbox) |
+| Response permissions optional, actions off by default | Account changes that you did not turn on | [Permissions](#permissions) |
+| App Service Authentication, then a role check in code | Access to the management UI by other tenant users | [Management UI](#management-ui) |
+| No storage keys, no SCM or FTP passwords, Entra ID-only telemetry | Key or password theft from settings or logs | `install.ps1` |
+| Azure Monitor alerts outside the app | A stopped, changed, or redeployed monitor that stays silent | [Check that the monitor runs](HOW_TO.md#check-that-the-monitor-runs) |
+| History and an email for each UI change | Silent changes by a UI admin | [Management UI](#management-ui) |
+
+Data that leaves the tenant: IP addresses to proxycheck.io, and one request per day to the GitHub API for the latest release. Audit records are processed in memory. Table Storage keeps one row per alert for 90 days, and short-lived lookups and counts (IP cache, sign-in networks, failed sign-in counts).
+
 ## Permissions
 
 `install.ps1` sets these permissions and grants admin consent through Microsoft Graph (app role assignments). A rerun removes the Graph roles that are no longer wanted.
@@ -116,17 +164,22 @@ The app does not follow a URL that fails the check, and logs an error. Because o
 
 | Control | Setting |
 |---|---|
-| Token | `permissions: {}` for the workflow. Each job gets `contents: read` only. |
+| Token | `permissions: {}` for the workflow. Each job gets `contents: read`. Exceptions: CodeQL and Scorecard upload results (`security-events: write`), and the release job creates the release and its attestation. |
 | Checkout | `persist-credentials: false`. The token is not kept in `.git/config`. |
 | Actions | Pinned to full commit SHAs. Dependabot proposes updates after a 7-day cooldown. |
 | Triggers | `pull_request`, not `pull_request_target`. Code from a fork runs with a read-only token and no secrets. |
 | Secrets | None. CI does not deploy and has no Azure access. |
 | `install.ps1` tests | Pester tests run the script against a fake `az`. They make no network call |
 | Workflow changes | zizmor checks `.github` on each run |
+| Code | bandit (Python, medium and high findings fail) on each run. CodeQL (`security-extended`, Python and JavaScript) on each push and weekly |
+| Repository practices | OpenSSF Scorecard weekly, published for the README badge |
+| Releases | A source archive with a signed build provenance attestation: `gh attestation verify m365-ato-monitor-vX.Y.Z.tar.gz --repo <owner>/m365-ato-monitor` |
+
+CodeQL, Scorecard, and the attestation run only in a public repository. A private repository needs GitHub Advanced Security (CodeQL, Scorecard upload) and GitHub Enterprise Cloud (attestations).
 
 Apply these repository settings (GitHub > Settings):
 
-1. Rules > Rulesets: for `main`, require a pull request and require the four CI checks: Python tests and lint, Dependency audit, PowerShell (install.ps1), and Workflow security (zizmor).
+1. Rules > Rulesets: for `main`, require a pull request and require the five CI checks: Python tests and lint, Dependency audit, Static analysis (bandit), PowerShell (install.ps1), and Workflow security (zizmor). In a public repository, also require CodeQL.
 2. Actions > General > Workflow permissions: select "Read repository contents and packages permissions". Clear "Allow GitHub Actions to create and approve pull requests".
 3. Advanced Security: turn on Dependabot alerts, secret scanning, and push protection (for a private repository, secret scanning needs GitHub Secret Protection).
 

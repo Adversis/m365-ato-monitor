@@ -51,7 +51,7 @@ A second workflow (`.github/workflows/devcontainer.yml`) builds the dev containe
 
 ## Releases
 
-To release, raise `VERSION` in `function/version.py` (`MAJOR.MINOR.PATCH`) in a commit to `main`. The release workflow (`.github/workflows/release.yml`) runs CI, then tags the commit `v<VERSION>` and publishes a GitHub release with generated notes. The workflow skips a version that already has a release.
+To release, move the "Unreleased" entries in `CHANGELOG.md` under the new version, and raise `VERSION` in `function/version.py` (`MAJOR.MINOR.PATCH`) in the same commit to `main`. The release workflow (`.github/workflows/release.yml`) runs CI, then tags the commit `v<VERSION>` and publishes a GitHub release with generated notes. The workflow skips a version that already has a release.
 
 Installed monitors check the latest release once a day. They show "Update available" in the management UI and the weekly report. A person then runs `./install.ps1 -Update`. If an update needs more than `-Update` (for example a step that the person must do by hand), say so in the release notes.
 

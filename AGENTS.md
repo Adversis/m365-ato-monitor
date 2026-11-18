@@ -212,14 +212,15 @@ Use the dev container (`.devcontainer/`) when you can. It has the pinned version
 
 CI has these workflows:
 
-- On each pull request, `.github/workflows/ci.yml` runs four checks: Python tests and lint, Dependency audit, PowerShell (syntax and the Pester tests of `install.ps1`), and Workflow security (zizmor).
+- On each pull request, `.github/workflows/ci.yml` runs five checks: Python tests and lint, Dependency audit, Static analysis (bandit), PowerShell (syntax and the Pester tests of `install.ps1`), and Workflow security (zizmor).
+- In a public repository, `.github/workflows/codeql.yml` (CodeQL) and `.github/workflows/scorecard.yml` (OpenSSF Scorecard) also run. In a private repository, they skip.
 - When the container or its inputs change, `.github/workflows/devcontainer.yml` builds the dev container and runs `make check` in it.
 - `.github/workflows/microsoft-nets.yml` runs every month. It fails in two cases:
   - `function/microsoft_nets.json` (Microsoft 365 server ranges: the Office 365 endpoints list minus all Azure service tags) is out of date.
   - A hand-kept `INTERNAL_NETS` prefix (`function/microsoft_nets.py`) is in an Azure service tag.
 
   To fix it, run `python3 scripts/update_microsoft_nets.py`. Then commit the file. Then deploy (rule 1).
-- When a commit to `main` changes `function/version.py`, `.github/workflows/release.yml` runs CI. Then it tags the commit `v<VERSION>` and publishes a GitHub release. Installed monitors report this release as "Update available".
+- When a commit to `main` changes `function/version.py`, `.github/workflows/release.yml` runs CI. Then it tags the commit `v<VERSION>` and publishes a GitHub release with a source archive (with a build provenance attestation in a public repository). Add the changes to `CHANGELOG.md` first. Installed monitors report this release as "Update available".
 
 Keep the workflows green.
 

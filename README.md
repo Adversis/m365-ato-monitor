@@ -21,6 +21,8 @@ The monitor emails each finding from your alert mailbox. The email says how to i
 
 The app signs in with a managed identity, so there is no client secret to store or rotate. Audit records stay in Microsoft 365. The monitor keeps one row per alert for 90 days. It sends only IP addresses to proxycheck.io.
 
+Diagram with the security controls: [Security: Architecture and controls](docs/SECURITY.md#architecture-and-controls).
+
 ### Example alert
 
 A user signed in from a VPN address in Amazon's network. The details are not real.
@@ -348,6 +350,7 @@ See [Development](docs/DEVELOPMENT.md). To add a detection, see [AGENTS.md](AGEN
 | [Architecture](docs/ARCHITECTURE.md) | Design, detections, latency, detection limits, Azure resources, costs |
 | [Security](docs/SECURITY.md) | Permissions, credentials, known limitations |
 | [API Compatibility](docs/API_COMPATIBILITY.md) | Microsoft and proxycheck.io APIs, audit record fields |
+| [Changelog](CHANGELOG.md) | The changes in each release |
 | [App Insights Queries](docs/APP_INSIGHTS_QUERIES.md) | KQL queries |
 | [Development](docs/DEVELOPMENT.md) | Dev container, tests, CI |
 | [AGENTS.md](AGENTS.md) | Instructions for AI assistants |
