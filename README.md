@@ -2,11 +2,9 @@
 
 **Account takeover alerts for Microsoft 365, running in your own Azure subscription.**
 
-M365 ATO Monitor reads your tenant's audit log and emails you (and, if you choose, responds automatically) when it finds signs of account takeover. It looks for common attacker actions, such as hiding replies with an inbox rule, forwarding mail, signing in from a suspicious network, adding an MFA method, or giving an app access to mail.
+M365 ATO Monitor reads your tenant's audit log and emails you when it finds signs of account takeover. Examples: an inbox rule that hides replies, mail forwarding, a sign-in from a suspicious network, a new MFA method, or an app that gets access to mail. It can also respond automatically.
 
-Microsoft's automated response to risky sign-ins needs Entra ID P2, and Business Premium includes only P1. Business Basic and Business Standard include neither.
-
-This monitor gives every license alerts and an optional [automatic response](#automatic-response). It runs in your own Azure subscription and costs a few dollars a month for a small tenant.
+Microsoft's own risk detection and response needs Entra ID P2. Business Premium includes only P1, and Business Basic and Standard include neither. This monitor works with every license. It is free (MIT license). You pay only for the Azure resources: a few dollars a month for a small tenant. See [How does it compare with Entra ID P2?](#how-does-it-compare-with-entra-id-p2)
 
 > [!IMPORTANT]
 > **This is not real-time protection.** The monitor sees an event only after Microsoft publishes its audit record. Many records arrive within about 10 minutes, but Microsoft does not guarantee a time, and some take 1–2 hours or more. The monitor checks for new records every 2 minutes. The optional automatic response can act only after the record arrives.
@@ -48,7 +46,7 @@ The button opens the user's page in the management UI. That page shows the user'
 
 **Commercial cloud only.** GCC, GCC High, DoD, and China are not supported.
 
-Many Business tenants have no Azure subscription yet. Adding one takes about 10 minutes: a pay-as-you-go sign-up, or, if your organization already pays Microsoft under a Microsoft Customer Agreement, a new subscription on that billing account. See [Get an Azure subscription](docs/GETTING_STARTED.md#get-an-azure-subscription). [Getting Started](docs/GETTING_STARTED.md#1-prerequisites) shows how to check each requirement.
+Many Business tenants have no Azure subscription yet. Adding one takes about 10 minutes. Use a pay-as-you-go sign-up. Or, if your organization has a Microsoft Customer Agreement, add a subscription to that billing account. See [Get an Azure subscription](docs/GETTING_STARTED.md#get-an-azure-subscription). [Getting Started](docs/GETTING_STARTED.md#1-prerequisites) shows how to check each requirement.
 
 ### Turn on audit logging
 
@@ -122,7 +120,14 @@ In PowerShell 7, in the project folder:
 ./install.ps1 -AdminEmail security@contoso.com -Location eastus
 ```
 
-The script signs in to Azure, shows a plan, and asks before it changes anything. It creates the Azure resources and two app registrations, grants the permissions, deploys the code, and checks that the monitor answers. To limit Mail.Send to the alert mailbox, it also signs in to Exchange Online (it shows a URL and a code: open the URL in any browser, also on another computer) and makes a hidden group, `m365-ato-monitor-senders`, with the alert mailbox as the member. To change the alert mailbox later, add the new mailbox to that group, then change it in the management UI ([How-To](docs/HOW_TO.md#change-the-alert-mailbox)). Then it waits up to 10 minutes for the first monitor run, tests each alert type, and asks if it should send one test email for each alert type. Press Ctrl+C to stop the wait: the install is complete at that point.
+The script:
+
+1. Signs in to Azure, shows a plan, and asks before it changes anything.
+2. Creates the Azure resources and two app registrations, grants the permissions, and deploys the code.
+3. Signs in to Exchange Online to limit Mail.Send to the alert mailbox. It shows a URL and a code: open the URL in any browser, also on another computer. It makes a hidden group, `m365-ato-monitor-senders`, with the alert mailbox as the member.
+4. Waits up to 10 minutes for the first monitor run and tests each alert type. Then it asks if it should send one test email for each type. The install is complete before this step: press Ctrl+C to stop the wait.
+
+To change the alert mailbox later, add the new mailbox to the group, then change it in the management UI ([How-To](docs/HOW_TO.md#change-the-alert-mailbox)).
 
 To see each change without making any, add `-DryRun`. `./install.ps1 -Help` lists the commands and options.
 
@@ -135,7 +140,7 @@ If a step fails, the script says how to fix it. After the fix, run the same comm
 | `./install.ps1 -Verify -SendTestAlerts` | Also send one test email for each alert type |
 | `./install.ps1 -Uninstall` | Delete the Azure resources and the app registrations |
 
-You do not need `az login` first: the script signs in for you. If the Azure CLI is signed in to another tenant than the one of `-AdminEmail`, the script stops before any change and shows the command for the right tenant.
+You do not need `az login` first: the script signs in for you. If the Azure CLI is signed in to the wrong tenant, the script stops before any change. It shows the command for the tenant of `-AdminEmail`.
 
 ### Install in another tenant
 
@@ -167,7 +172,7 @@ Step-by-step guide and troubleshooting: [Getting Started](docs/GETTING_STARTED.m
 
 ## After installation
 
-Microsoft starts to deliver audit records 12–24 hours after the first run. A setup email arrives then, and the "Starting state" report follows. The report lists the inbox rules of every mailbox and the findings in up to 180 days of audit history, so that you can find what an attacker did before the install.
+Microsoft starts to deliver audit records 12–24 hours after the first run. A setup email arrives then, and the "Starting state" report follows. The report lists the inbox rules of every mailbox and the findings in up to 180 days of audit history. Use it to find what an attacker did before the install.
 
 Add a mail rule so that mail with `[M365 Alert]` in the subject does not go to junk mail. Optional: get a free [proxycheck.io](https://proxycheck.io/dashboard/) key (1,000 lookups per day; 100 without a key) and enter it in the management UI. The Overview page shows how much of the daily limit is used, and the monitor emails you when it is low or used up. See [What happens when the proxycheck.io quota runs out?](#what-happens-when-the-proxycheckio-quota-runs-out)
 
@@ -192,11 +197,17 @@ The monitor can revoke a user's sessions, block sign-in, or turn off an inbox ru
 
 <img src="docs/images/auto-response.png" alt="A high inbox rule alert in the management UI: a rule named '.' forwards mail about invoices to an outside address. The response line says: Block sign-in: done; Revoke sessions: done; Disable inbox rule: done." width="700">
 
-A revoke does not stop every app at once: Outlook desktop and other apps with continuous access evaluation stop within about 15 minutes, web apps and other clients when their access token expires (60 to 90 minutes). See [How fast a revoke or block applies](docs/HOW_TO.md#how-fast-a-revoke-or-block-applies).
+A revoke does not stop every app at once. Outlook desktop and other apps with continuous access evaluation stop within about 15 minutes. Web apps and other clients stop when their access token expires (60 to 90 minutes). See [How fast a revoke or block applies](docs/HOW_TO.md#how-fast-a-revoke-or-block-applies).
 
-The response never changes passwords. It does not act on alerts about admin changes or app consents, and Microsoft Graph refuses changes to admin accounts. It acts only on the account that signed in, or on an account that changed its own mailbox or MFA. A change that one account made to another account gets no action, because either account can be the compromised one. The same actions are also buttons on each user's page in the management UI. Details: [How-To: Respond automatically](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).
+What the response does not do:
 
-A wrong-password sign-in never triggers an account action, even if **Email failed sign-ins** is on. A high sign-in alert can trigger an action after a successful sign-in or a correct password stopped by MFA or Conditional Access.
+- Change passwords.
+- Act on admin accounts: Microsoft Graph refuses it.
+- Act on alerts about admin changes or app consents.
+- Act when one account changed another account. Either account can be the compromised one.
+- Act after a wrong-password sign-in.
+
+The same actions are buttons on each user's page in the management UI. Details: [How-To: Respond automatically](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).
 
 ## Management UI
 
@@ -222,23 +233,23 @@ Sign-in uses Entra ID. The person who runs the install can open the page. To giv
 
 | Detection | Examples | Severity |
 | --- | --- | --- |
-| Inbox rules | Forward to an external address; forward to an unverified directory recipient (medium); move mail to a folder that users seldom open; hide mail about payments or security; a rule named `..`. A rule that only deletes mail sends email only after another alert for the user, from a flagged IP, or after a sign-in from a new network in the 24 hours before | High or medium |
+| Inbox rules | Forward to an external address; move mail to a folder that users seldom open; hide mail about payments or security; a rule named `..`. A rule that only deletes mail sends email only with another sign of takeover | High or medium |
 | Mailbox forwarding | Forwarding to an external address (high) or an internal address (medium) | High or medium |
 | Mail flow (transport) rules | External BCC or redirect; skip spam filtering | High or medium |
 | OAuth consent | An app gets mailbox, file, or directory access, such as `Mail.Read` or `full_access_as_app` | High |
-| MFA changes | A method added to an account that already has MFA, a method or Authenticator device replaced, or the default method changed; per-user MFA turned off. All methods removed (re-register) is listed with no email. A method added by the user or by an admin sends email only if one of them had another alert in the 7 days before, or the person who made the change signed in from a new network in the hour before. Otherwise it is in the alert list with no email. Before that, the monitor loads 30 days of past sign-ins from the audit log, once (Overview > Monitor > Past sign-ins loaded). A user whose network history is shorter than 14 days gets no email for such a change, unless there was another alert; a change by someone whose sign-ins the monitor never saw (for example a partner tenant's admin) sends email | High or medium |
+| MFA changes | A method added or replaced, or the default method changed, on an account that already has MFA; per-user MFA turned off. A method change sends email only after another alert, or after a sign-in from a new network. All methods removed: listed, no email | High or medium |
 | Admin roles | Global Administrator or another admin role assigned | High or medium |
 | Mailbox delegation | Full Access or Send As granted; a folder shared with everyone | Medium |
 | App credentials | A secret or certificate added to an app registration | Medium |
 | Domains and federation | Federation set on a domain; a domain added | High or medium |
 | Protection turned off | Unified audit logging off; external auto-forwarding allowed; an anti-phishing policy removed | High or medium |
-| Risky sign-in methods | Legacy authentication (password only, no MFA); device code sign-in; an attack tool or a scripting library in the user agent. A failed sign-in (wrong password) sends email only if you turn on **Email failed sign-ins** | High or medium |
-| Suspicious sign-in IP | A sign-in from a VPN, Tor, proxy, or hosting address. A failed sign-in (wrong password) sends email only if you turn on **Email failed sign-ins**. A correct password stopped by MFA always sends email | Low to high |
+| Risky sign-in methods | Legacy authentication (password only, no MFA); device code sign-in; an attack tool or a scripting library in the user agent | High or medium |
+| Suspicious sign-in IP | A sign-in from a VPN, Tor, proxy, or hosting address | Low to high |
 | New country | A successful sign-in from a country that is new for the user. The monitor learns each user's countries for 14 days first | High |
 | Stolen session | One sign-in session used from two countries, or used in the same country from a VPN, proxy, hosting, or Tor IP that did not sign in | High or medium |
 | Mail access from a risky IP | Mail read or sent from a VPN, proxy, hosting, or new-country IP that did not sign in as the user in the last 7 days | High or medium |
 
-Most findings become high if the source IP is a VPN, proxy, or hosting address, or is in a country that is new for the user. You can turn off each alert type.
+Most findings become high if the source IP is a VPN, proxy, or hosting address, or is in a country that is new for the user. A failed sign-in (wrong password) sends email only if you turn on **Email failed sign-ins**. A correct password stopped by MFA always sends email. You can turn off each alert type.
 
 How each check works: [Architecture](docs/ARCHITECTURE.md#compromise-check). How to investigate each alert: [Alert Triage](docs/TRIAGE.md).
 
@@ -246,7 +257,7 @@ How each check works: [Architecture](docs/ARCHITECTURE.md#compromise-check). How
 
 - AiTM phishing through a residential proxy in the user's own country. The monitor detects the attacker's next steps instead: inbox rules, forwarding, MFA changes, and app consents.
 - A stolen session used from a normal home or office network in the user's own country.
-- Session and mail access activity from Microsoft 365's own servers, for example Teams, Copilot, or Outlook mobile acting for the user. The record then shows a Microsoft IP, not the client's. The monitor skips these records: IPs from Microsoft's published lists (without the Azure ranges that customers can use), and records that a Microsoft-owned app wrote for the user's app. Such an IP also does not make an alert high.
+- Activity that Microsoft 365's own servers do for the user, for example Teams, Copilot, or Outlook mobile. The record shows a Microsoft IP, not the user's, so the session and mail access checks skip it.
 - Mail read with a stolen token, if the tenant does not log `MailItemsAccessed`. Business plans may not log it. The Overview page shows if your tenant does.
 - Passkey and FIDO2 registration, and SharePoint, OneDrive, and Teams activity.
 - A new device, browser, or mail client.
@@ -260,32 +271,30 @@ About $2–10 per month for a small tenant, mostly for the Function App and the 
 
 ## FAQ
 
-### Does it work with Entra ID P1 or P2?
+### How does it compare with Entra ID P2?
 
-Yes. It reads the audit log, which every plan has. With P2, Entra ID Protection also scores risky sign-ins and can respond to them. The monitor still adds alerts for mailbox and tenant changes, such as inbox rules, forwarding, and app consents.
+| | This monitor | Entra ID P2 |
+| --- | --- | --- |
+| Cost | Free (MIT license). Azure resources: about $2–10 per month for a small tenant | $10 per user per month, paid yearly ([Microsoft list price](https://www.microsoft.com/security/business/microsoft-entra-pricing)). Included in Microsoft 365 E5 |
+| When | After Microsoft publishes the audit record: minutes to hours | At each sign-in |
+| Response | Email. Optional: revoke sessions, block sign-in, turn off the rule, after the alert | Risk-based Conditional Access: ask for MFA or a password change, or block the sign-in |
 
-### How does it compare with Entra ID Protection (P2)?
+Without P2 (Free, P1, Business Premium), Entra ID shows a risky sign-in only as "Additional risk detected", with no details and no risk-based policies.
 
-They work at different times. ID Protection scores each sign-in when it happens. With Entra ID P2, a risk-based Conditional Access policy can then ask for MFA or a secure password change, or block the sign-in. This monitor reads the audit log after Microsoft publishes it (minutes to hours later). It reports, and can revoke sessions or block sign-in after an alert. It does not stop a sign-in.
-
-Without P2 (Free, P1, Business Premium), ID Protection shows only "Additional risk detected" with no details, the Risky users report shows medium and high users with no details, and risk-based policies, "users at risk" alerts, and the weekly digest are not available.
-
-| ID Protection detection (license) | This monitor |
+| P2 detection | This monitor |
 | --- | --- |
-| Anonymous IP address (Free) | Suspicious sign-in IP: VPN, Tor, proxy, and hosting addresses (proxycheck.io) |
-| Atypical travel (P2); impossible travel, new country (P2 and Defender for Cloud Apps) | New country, after 14 days of learning. Stolen session: one session used from two countries |
-| Anomalous token (P2); attacker in the middle (Microsoft 365 E5) | Stolen session: one session used from two countries, or moved to a VPN, proxy, hosting, or Tor IP. Not a session used from a normal network in the user's own country |
-| Unfamiliar sign-in properties (P2) | No general check. New networks count only for MFA changes and inbox rules that only delete mail |
-| Malicious IP, verified threat actor IP (P2); Microsoft Entra threat intelligence (Free) | Partly: the proxycheck.io risk score and flags. No Microsoft threat intelligence |
-| Password spray: a password confirmed in a spray (P2) | No spray detection. Failed sign-ins from a risky IP are kept in the alert history; they send email only with **Email failed sign-ins**. A correct password stopped by MFA always sends email |
-| Leaked credentials (Free) | No |
-| Suspicious inbox forwarding, suspicious inbox manipulation rules (P2 and Defender for Cloud Apps) | Yes: inbox rules, mailbox forwarding, and mail flow rules |
-| Suspicious credential addition (P2) | MFA changes: a method added or replaced, the default method changed |
-| Anomalous user activity: admin changes (P2); token issuer anomaly (P2) | Fixed rules, not a baseline: admin roles, app consents, app credentials, domains and federation |
-| Suspicious sending patterns (P2 and Defender for Office 365) | No. The mail access check flags mail sent from a risky IP, not unusual sending |
-| Mass access to sensitive files, suspicious API traffic, PRT access, user-reported suspicious activity (P2, some with Defender) | No |
+| Anonymous IP address | Yes: VPN, Tor, proxy, and hosting addresses (proxycheck.io) |
+| Atypical travel, impossible travel, new country | New country, after 14 days of learning. One session used from two countries |
+| Anomalous token, attacker in the middle | One session used from two countries, or moved to a risky IP. Not from a normal network in the user's own country |
+| Inbox forwarding and inbox manipulation rules | Yes, and mail flow rules |
+| Suspicious credential addition | Yes: MFA method added or replaced, default method changed |
+| Admin changes, token issuer anomaly | Fixed rules, not a baseline: admin roles, app consents, app credentials, federation |
+| Malicious IP, threat intelligence | Partly: the proxycheck.io risk score. No Microsoft threat intelligence |
+| Unfamiliar sign-in properties | No |
+| Password spray, leaked credentials | No |
+| Unusual sending, mass file access, API traffic, token theft from a device | No |
 
-The monitor also alerts on changes that ID Protection does not score: mail flow rules, mailbox delegation, audit logging turned off, and mail protection turned off. If you have P2, use risk-based Conditional Access to stop risky sign-ins, and this monitor for the mailbox and tenant changes. Source: Microsoft Learn, [What are risk detections?](https://learn.microsoft.com/entra/id-protection/concept-identity-protection-risks) and [ID Protection licensing](https://learn.microsoft.com/entra/id-protection/overview-identity-protection).
+Some P2 detections also need Defender for Cloud Apps or Microsoft 365 E5. The monitor also alerts on changes that P2 does not score: mailbox delegation, audit logging turned off, and mail protection turned off. If you have P2, use both: P2 to stop risky sign-ins, and this monitor for mailbox and tenant changes. Source: Microsoft Learn, [What are risk detections?](https://learn.microsoft.com/entra/id-protection/concept-identity-protection-risks)
 
 ### Does it block attacks?
 
@@ -317,22 +326,13 @@ Yes, with one install per tenant, each in an Azure subscription of that tenant. 
 
 ### How does it compare with other options?
 
-Microsoft Purview has some built-in alert policies. Use them as well. Entra ID P2 adds risk-based detection and response, and Defender adds more. A SIEM is more flexible but needs ongoing work.
+Microsoft Purview has some built-in alert policies: use them too. Defender adds more detection. A SIEM is more flexible, but needs ongoing work.
 
 ## Development
 
 `make check` runs all linters and tests. `make docker-check` runs them in a dev container with pinned tool versions.
 
 See [Development](docs/DEVELOPMENT.md). To add a detection, see [AGENTS.md](AGENTS.md#add-a-detection).
-
-## To do
-
-| Detection | Scope and limits |
-| --- | --- |
-| Session moves to another normal network in the same country | For example, from the user's home ISP to a different home ISP. Mobile networks and Wi-Fi changes cause the same pattern, so this needs more data to avoid false alerts |
-| Password spray | Many failed sign-ins for one user, or from one IP for many users. Microsoft Smart Lockout blocks part of this |
-| Security notification deleted | The user's "new MFA method" or "unusual sign-in" email deleted or moved soon after it arrived |
-| Direct Send abuse | Phishing sent through your tenant's MX host as an internal sender. The audit log does not record mail delivery, so this needs the message trace API and a live tenant to test with. Until then, [block Direct Send](docs/HOW_TO.md#block-direct-send) |
 
 ## Documentation
 
