@@ -169,7 +169,7 @@ CodeQL, Scorecard, and the attestation run only in a public repository. A privat
 
 Apply these repository settings (GitHub > Settings):
 
-1. Rules > Rulesets: for `main`, require a pull request and require the five CI checks: Python tests and lint, Dependency audit, Static analysis (bandit), PowerShell (install.ps1), and Workflow security (zizmor). In a public repository, also require CodeQL.
+1. Rules > Rulesets: for `main`, block force-push and deletion. For the tags `v*`, block deletion and updates, so that a release tag always points to the released code. This repository has both. With more than one maintainer, also require a pull request and the five CI checks for `main`: Python tests and lint, Dependency audit, Static analysis (bandit), PowerShell (install.ps1), and Workflow security (zizmor), and CodeQL.
 2. Actions > General > Workflow permissions: select "Read repository contents and packages permissions". Clear "Allow GitHub Actions to create and approve pull requests".
 3. Advanced Security: turn on Dependabot alerts, secret scanning, and push protection (for a private repository, secret scanning needs GitHub Secret Protection).
 
