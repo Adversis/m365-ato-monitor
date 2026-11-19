@@ -156,7 +156,7 @@ The app does not follow a URL that fails the check, and logs an error. Because o
 |---|---|
 | Token | `permissions: {}` for the workflow. Each job gets `contents: read`. Exceptions: CodeQL and Scorecard upload results (`security-events: write`), and the release job creates the release and its attestation. |
 | Checkout | `persist-credentials: false`. The token is not kept in `.git/config`. |
-| Actions | Pinned to full commit SHAs. Dependabot proposes updates after a 7-day cooldown. |
+| Actions and CI tools | Actions pinned to full commit SHAs. The CI tools (pip-audit, bandit, zizmor) pinned by hash in `.github/requirements`. Dependabot proposes updates after a 7-day cooldown. The app's own packages are not pinned: CI tests the newest versions that `function/requirements.txt` allows, as the deploy installs |
 | Triggers | `pull_request`, not `pull_request_target`. Code from a fork runs with a read-only token and no secrets. |
 | Secrets | None. CI does not deploy and has no Azure access. |
 | `install.ps1` tests | Pester tests run the script against a fake `az`. They make no network call |

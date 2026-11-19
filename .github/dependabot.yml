@@ -1,4 +1,5 @@
-# Updates the pinned action SHAs in .github/workflows.
+# Updates the pinned action SHAs in .github/workflows and the hash-pinned CI tools in
+# .github/requirements.
 # A new release must be 7 days old before Dependabot proposes it.
 # Python dependencies: the monthly CI run audits them (pip-audit).
 version: 2
@@ -27,3 +28,14 @@ updates:
     ignore:
       - dependency-name: python
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # The CI tools, pinned by hash (.github/requirements/*.txt, made with uv pip compile).
+  - package-ecosystem: pip
+    directory: /.github/requirements
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      ci-tools:
+        patterns: ["*"]

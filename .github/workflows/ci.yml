@@ -1,8 +1,10 @@
 # Tests and static checks. The token is read-only. The workflow has no Azure
 # credentials and does not deploy.
 #
-# Actions are pinned to full commit SHAs. Dependabot updates them
-# (.github/dependabot.yml).
+# Actions are pinned to full commit SHAs, and the CI tools (pip-audit, bandit,
+# zizmor) by hash (.github/requirements). Dependabot updates both
+# (.github/dependabot.yml). The app's own packages are not pinned: CI tests the
+# newest versions that function/requirements.txt allows, as the deploy installs.
 
 name: CI
 
@@ -63,7 +65,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pip-audit
-        run: python -m pip install pip-audit==2.10.1
+        run: python -m pip install --require-hashes --no-deps -r .github/requirements/pip-audit.txt
       - name: Audit function/requirements.txt
         run: pip-audit --requirement function/requirements.txt --progress-spinner off
 
@@ -81,7 +83,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install bandit
-        run: python -m pip install bandit==1.9.4
+        run: python -m pip install --require-hashes --no-deps -r .github/requirements/bandit.txt
       - name: Scan function/ (medium and high severity and confidence fail the job)
         run: bandit -r function -x function/.venv -ll -ii
 
@@ -122,6 +124,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install zizmor
-        run: python -m pip install zizmor==1.31.1
+        run: python -m pip install --require-hashes --no-deps -r .github/requirements/zizmor.txt
       - name: Audit .github
         run: zizmor --offline --format=github .github
