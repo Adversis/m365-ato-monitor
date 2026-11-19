@@ -56,11 +56,16 @@ Subscriptions > the subscription > **Overview** > **Offer** shows the type (pay-
 
 ### Roles for the person who installs
 
-| Scope | Role | Why |
-|---|---|---|
-| Azure subscription | Owner, or Contributor + User Access Administrator | The script creates role assignments for the managed identity and the monitor app |
-| Entra ID | Global Administrator. Or Privileged Role Administrator plus Exchange Administrator | The script grants admin consent. With the default `-MailSendScope mailbox`, it also signs in to Exchange Online to limit Mail.Send to the alert mailbox |
-| Entra ID | Permission to register applications | The script creates two app registrations: the monitor and the management UI |
+| Scope | Role | Required | Why |
+|---|---|---|---|
+| Azure subscription | Owner, or Contributor + User Access Administrator | Yes | The script creates role assignments for the managed identity and the monitor app |
+| Entra ID | Privileged Role Administrator, or Global Administrator | Yes | The script grants admin consent for Microsoft Graph application permissions. Only these two roles can grant them. Application Administrator and Cloud Application Administrator cannot |
+| Exchange Online | Exchange Administrator, or Global Administrator | Only with `-MailSendScope mailbox` (the default) | The script signs in to Exchange Online to limit Mail.Send to the alert mailbox. Without this role, use `-MailSendScope tenant`: Graph Mail.Send for every mailbox, no Exchange sign-in |
+| Entra ID | Permission to register applications (the default for users, or Application Developer) | Yes | The script creates two app registrations: the monitor and the management UI |
+
+Global Administrator covers all the Entra ID and Exchange roles. Without it, the smallest set is Privileged Role Administrator plus Exchange Administrator, or Privileged Role Administrator alone with `-MailSendScope tenant`.
+
+The monitor does not use your roles after the install. Assign the roles for the install and remove them after it, or with Privileged Identity Management (Entra ID P2) activate them only for the install. A later `-Update` grants nothing new if the permissions are already in place.
 
 ### Unified audit logging
 

@@ -1,5 +1,11 @@
 # M365 ATO Monitor
 
+[![CI](https://github.com/Adversis/m365-ato-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/Adversis/m365-ato-monitor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB)
+![Azure Functions Flex Consumption](https://img.shields.io/badge/Azure%20Functions-Flex%20Consumption-0078D4)
+![No Entra ID P2 needed](https://img.shields.io/badge/Entra%20ID%20P2-not%20needed-success)
+
 M365 ATO Monitor detects signs of account takeover in Microsoft 365. It runs in your Azure subscription and needs no Entra ID P2 or Defender license.
 
 > [!IMPORTANT]

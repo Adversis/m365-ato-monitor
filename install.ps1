@@ -24,7 +24,9 @@
 
     The person who runs it needs: Owner (or Contributor and User Access
     Administrator) on the subscription, and Global Administrator or
-    Privileged Role Administrator in Entra ID (for admin consent).
+    Privileged Role Administrator in Entra ID (for admin consent). With
+    -MailSendScope mailbox (the default), also Exchange Administrator, unless
+    Global Administrator.
 
 .PARAMETER AdminEmail
     The alert mailbox. A licensed or shared mailbox in the tenant of the
