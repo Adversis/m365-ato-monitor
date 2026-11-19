@@ -297,18 +297,36 @@ The Functions host uses the same managed identity for its storage (`AzureWebJobs
 
 ## Costs
 
-Measured in two small tenants, 1–18 November 2026 (Azure Cost Management, actual cost): $0.88 and $0.78, about $1.30–1.50 per month. Almost all of it is fixed. The Function App and the logs used a small part of Azure's free monthly allowances.
+About $1.50 per month for a tenant with fewer than 100 users, and a few dollars at 1,000 users (Azure list prices, November 2026). Almost all of it is fixed. The Function App and the logs use a small part of Azure's free monthly allowances.
 
-| Resource | Measured (18 days) | Free allowance | What drives it |
+| Resource | Per month | Free allowance | What drives it |
 |---|---|---|---|
-| Storage operations | $0.40–0.47 | none | Blob reads and writes of the Functions host (timer state, leases, the code package), plus the app's tables. Mostly fixed. The data stored costs less than $0.01 |
-| Log alert rule, 15-minute frequency (code deployed) | $0.37–0.41 | none | A flat fee per rule, about $0.50 per month. The two 30-minute rules on Application Insights cost less than $0.01 |
-| Function App (Flex Consumption, 512 MB) | $0 | 100,000 GB-s and 250,000 executions per subscription and month | The timers (every 2 and every 5 minutes) are about 30,000 executions per month at any tenant size. Used: 8,200–10,600 GB-s in 18 days, about 15% of the allowance. Above it: $0.000026 per GB-s ($0.000037 in some regions), $0.40 per million executions |
-| Log Analytics ingestion | $0 | 5 GB per billing account and month | 0.4 GB in 18 days, about 15% of the allowance. Above it: about $2.30 per GB. Retention: 90 days (`install.ps1`) |
+| Storage operations | about $0.80 | none | Blob reads and writes of the Functions host (timer state, leases, the code package), plus the app's tables. Mostly fixed. The data stored costs less than $0.01 |
+| Log alert rule, 15-minute frequency (code deployed) | about $0.50 | none | A flat fee per rule. The two 30-minute rules on Application Insights cost less than $0.01 |
+| Function App (Flex Consumption, 512 MB) | $0 under 500 users | 100,000 GB-s and 250,000 executions per subscription | The timers (every 2 and every 5 minutes) are about 30,000 executions per month at any tenant size, and about 14,000 GB-s. Each user adds about 140 GB-s. Above the allowance: $0.000026 per GB-s ($0.000037 in some regions), $0.40 per million executions |
+| Log Analytics ingestion | $0 | 5 GB per billing account | About 0.9 GB per month at any tenant size (see below). Above the allowance: about $2.30 per GB. Retention: 90 days |
 | Activity log alert, proxycheck.io (free key) | $0 | | |
 
-Free allowances are shared with other resources. Check [Azure Functions pricing](https://learn.microsoft.com/azure/azure-functions/pricing) for current Flex Consumption rates and grants.
+| Users | Per month |
+|---|---|
+| Fewer than 100 | about $1.50 |
+| 500 | about $1.50 |
+| 1,000 | about $3 (Function time above the free allowance) |
 
-What grows with tenant size: the run time per run (more audit records), the table operations (one row per record for deduplication), and the log volume. In these two tenants, each was about 15% of its free allowance. Log volume is the part to watch in a large tenant: each GB above 5 GB per month is about $2.30. To check your own bill: Azure portal > Cost Management > Cost analysis, scope the resource group `rg-<name>`, group by Meter.
+Free allowances are shared with other resources: other Flex Consumption apps in the subscription, and other Log Analytics workspaces of the billing account. Check [Azure Functions pricing](https://learn.microsoft.com/azure/azure-functions/pricing) for current Flex Consumption rates and grants.
+
+Log volume, about 0.9 GB per month:
+
+| Source | Share | Grows with users |
+|---|---|---|
+| Functions host start-up and options (Flex Consumption starts the host often) | 51% | No |
+| Host metrics and performance counters (`customMetrics`, `performanceCounters`) | 33% | No |
+| Function start and end lines, requests | 10% | No (one per run) |
+| Monitor code, one set of lines per run | 5% | No |
+| Monitor code, per sign-in and per alert | less than 1% | Yes |
+
+`./install.ps1 -Update -HostLogs warnings` keeps only the host's warnings and errors and turns off the host metrics and performance counters: about 85% less log volume. The monitor's own logs, the reports, and the health alerts do not change. Later runs keep the value. `-HostLogs full` sets it back.
+
+To check your own bill: Azure portal > Cost Management > Cost analysis, scope the resource group `rg-<name>`, group by Meter.
 
 Azure has no spending limit for pay-as-you-go subscriptions. Set a Cost Management budget on the resource group to get a warning.

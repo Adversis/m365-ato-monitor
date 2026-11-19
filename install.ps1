@@ -75,6 +75,13 @@
     time limits that. Later runs (also -Update) keep the value. 0 keeps the
     current value.
 
+.PARAMETER HostLogs
+    full (default) or warnings. warnings: the Functions host logs only warnings
+    and errors from its start-up and its own components, and sends no host metrics
+    or performance counters. This is about 85% of the log volume. The monitor's
+    own logs, the reports, and the health alerts do not change. Later runs (also
+    -Update) keep the value.
+
 .PARAMETER Update
     Deploy the code of this folder and repair the setup. Keeps all settings.
 
@@ -128,6 +135,7 @@ param(
     [Parameter(ParameterSetName = 'Install')][ArgumentCompleter({ param($c, $p, $word) 'mailbox', 'tenant' | Where-Object { $_ -like "$word*" } })][string]$MailSendScope = 'mailbox',
     [Parameter(ParameterSetName = 'Install')][string[]]$UiAdmins = @(),
     [Parameter(ParameterSetName = 'Install')][Parameter(ParameterSetName = 'Update')][ValidateRange(0, 24)][int]$UiSessionHours = 0,
+    [Parameter(ParameterSetName = 'Install')][Parameter(ParameterSetName = 'Update')][ValidateSet('full', 'warnings')][string]$HostLogs,
     [Parameter(ParameterSetName = 'Update', Mandatory)][switch]$Update,
     [Parameter(ParameterSetName = 'Verify', Mandatory)][switch]$Verify,
     [Parameter(ParameterSetName = 'Verify')][switch]$SendTestAlerts,
@@ -1425,7 +1433,23 @@ function Set-HealthAlerts([string]$Email, [string]$Loc) {
 # Code
 # -----------------------------------------------------------------------------
 
-function New-CodePackage {
+# -HostLogs warnings: the host's start-up and component logs (most of the log volume) only from
+# warnings up. The monitor's logs (category Function.<name>.User) stay at Information: the
+# reports and the "no runs" alert read them. Function start and end lines stay too.
+function Get-HostJson([string]$Path, [string]$Level) {
+    $text = Get-Content -Raw -LiteralPath $Path
+    if ($Level -ne 'warnings') { return $text }
+    $json = $text | ConvertFrom-Json -AsHashtable
+    if (-not $json.ContainsKey('logging')) { $json.logging = @{} }
+    $json.logging.logLevel = [ordered]@{
+        default = 'Information'; 'Host.Startup' = 'Warning'; 'Host.Aggregator' = 'Warning'; Microsoft = 'Warning'
+    }
+    if (-not $json.logging.ContainsKey('applicationInsights')) { $json.logging.applicationInsights = @{} }
+    $json.logging.applicationInsights.enablePerformanceCountersCollection = $false
+    return ($json | ConvertTo-Json -Depth 10)
+}
+
+function New-CodePackage([string]$HostLogLevel = 'full') {
     $src = Join-Path $PSScriptRoot 'function'
     if (-not (Test-Path (Join-Path $src 'function_app.py'))) { Stop-Install "function/function_app.py not found next to install.ps1." }
     $zip = Join-Path ([System.IO.Path]::GetTempPath()) "m365atomon-code-$([guid]::NewGuid().ToString('N')).zip"
@@ -1438,7 +1462,11 @@ function New-CodePackage {
             $_.Name -notin @('local.settings.json') -and $_.Extension -ne '.pyc'
         } | ForEach-Object {
             $rel = [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $rel) | Out-Null
+            if ($rel -eq 'host.json') {
+                $writer = [System.IO.StreamWriter]::new($archive.CreateEntry($rel).Open())
+                try { $writer.Write((Get-HostJson $_.FullName $HostLogLevel)) } finally { $writer.Dispose() }
+            }
+            else { [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $rel) | Out-Null }
         }
     }
     finally { $archive.Dispose() }
@@ -1452,7 +1480,7 @@ function Publish-Code {
     if (-not $DryRun -and (Get-SiteProperty (Get-Site) 'state') -ne 'Running') {
         Invoke-AzChange -What 'Start the Function App' functionapp start --resource-group $n.ResourceGroup --name $n.FunctionApp | Out-Null
     }
-    $zip = New-CodePackage
+    $zip = New-CodePackage $script:HostLogLevel
     try {
         Invoke-AzChange -What 'Deploy the function code (remote build installs requirements.txt)' -Retry functionapp deployment source config-zip `
             --resource-group $n.ResourceGroup --name $n.FunctionApp --src $zip --build-remote true --timeout 900 | Out-Null
@@ -1623,6 +1651,8 @@ function Install-Monitor {
     $existingRg = Get-ResourceOrNull @('group', 'show', '--name', $script:N.ResourceGroup)
     $existing = if ($existingRg) { Get-ExistingSettings } else { @{} }
     if ($isUpdate -and -not $existingRg) { Stop-Install "No installation named '$Name' in this subscription." 'Run ./install.ps1 without -Update.' }
+    # -HostLogs, else the value of the last run (app setting HOST_LOGS), else full.
+    $script:HostLogLevel = if ($HostLogs) { $HostLogs } elseif ($existing['HOST_LOGS'] -eq 'warnings') { 'warnings' } else { 'full' }
 
     Write-Step 'Choose the settings'
     $loc = if ($existingRg) { $existingRg.location } else { $Location }
@@ -1741,6 +1771,7 @@ function Install-Monitor {
         MAIL_SEND_GROUP = $(if ($scopeSetting -eq 'mailbox') { $sendGroup } else { '' })
         RESPONSE_PERMISSIONS = $(if ($respond) { 'true' } else { 'false' })
         APPLICATIONINSIGHTS_AUTHENTICATION_STRING = "Authorization=AAD;ClientId=$($script:Uami.clientId)"
+        HOST_LOGS = $script:HostLogLevel
     }
     # The alert mailbox is a default. The UI overrides it; keep a UI change on a rerun.
     if (-not $existing['ADMIN_EMAIL'] -or $AdminEmail) { $settings.ADMIN_EMAIL = $email }
@@ -1948,6 +1979,9 @@ Options:
   -UiAdmins <upn>,<upn>      More management UI admins. You get the role automatically.
   -UiSessionHours <1-24>     How long a management UI sign-in lasts. Default: 8 hours. Later runs
                              keep the value.
+  -HostLogs <level>          full (default) or warnings: the Functions host logs only warnings
+                             (about 85% less log volume). The monitor's own logs do not change.
+                             Later runs keep the value.
   -DryRun                    Show each change. Make no change.
   -Yes                       Ask no questions.
   -Help                      Show this text. Details: Get-Help ./install.ps1 -Detailed

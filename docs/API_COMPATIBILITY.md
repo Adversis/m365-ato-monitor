@@ -160,7 +160,7 @@ IP reputation for sign-in IPs and finding IPs. Checked November 2026.
 | `operator.name` | `operator` | Alert text only ("Service") |
 | `attack_history` (counts by type, for example `login_attempt`) | `attacks` | Alert text only ("Attacks seen") |
 
-v2 calls a cloud host (Azure, AWS) a VPN with risk 66. v3 calls it hosting with risk 33. Both are medium. A comparison of 322 IPs from two tenants, and 18 public VPN, Tor, and cloud IPs, gave the same confidence in v2 and v3 for each IP. A v3 `proxy` IP is medium, and high if `attack_history` has attacks. v2 gave high to SOCKS proxies only, and low to other proxies. v3 does not say which kind of proxy.
+v2 calls a cloud host (Azure, AWS) a VPN with risk 66. v3 calls it hosting with risk 33. Both are medium. A comparison of 340 sign-in, VPN, Tor, and cloud IPs gave the same confidence in v2 and v3 for each IP. A v3 `proxy` IP is medium, and high if `attack_history` has attacks. v2 gave high to SOCKS proxies only, and low to other proxies. v3 does not say which kind of proxy.
 
 Response `status`:
 

@@ -352,6 +352,34 @@ Describe 'New-CodePackage' {
         }
         finally { Remove-Item $zip -ErrorAction SilentlyContinue }
     }
+
+    It 'writes host.json unchanged by default, and with host warnings only for -HostLogs warnings' {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $read = {
+            param($zip)
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                $reader = [System.IO.StreamReader]::new(($archive.Entries | Where-Object FullName -eq 'host.json').Open())
+                try { $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+            }
+            finally { $archive.Dispose() }
+        }
+        $full = New-CodePackage
+        $quiet = New-CodePackage 'warnings'
+        try {
+            $f = & $read $full
+            $f.logging.ContainsKey('logLevel') | Should -BeFalse
+            $q = & $read $quiet
+            $q.logging.logLevel['Host.Startup'] | Should -Be 'Warning'
+            $q.logging.logLevel['Host.Aggregator'] | Should -Be 'Warning'
+            $q.logging.logLevel['Microsoft'] | Should -Be 'Warning'
+            $q.logging.logLevel['default'] | Should -Be 'Information'    # the monitor's own logs (reports, no-runs alert)
+            $q.logging.applicationInsights.enablePerformanceCountersCollection | Should -BeFalse
+            $q.logging.applicationInsights.samplingSettings.excludedTypes | Should -Be 'Request;Trace'   # kept
+            $q.functionTimeout | Should -Be $f.functionTimeout
+        }
+        finally { Remove-Item $full, $quiet -ErrorAction SilentlyContinue }
+    }
 }
 
 Describe 'Help' {

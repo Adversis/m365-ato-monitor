@@ -9,6 +9,8 @@ Detection:
 - MFA method changes: the alert shows the old and new methods. A change that keeps the same number of methods alerts. A reset to no methods is listed with no email. The learning period is quiet, and 30 days of past sign-ins load once after the update.
 - IP reputation moves to proxycheck.io v3. Alerts show the VPN or proxy service, the hostname, and the attacks that proxycheck.io recorded. A proxy is medium, and high with recorded attacks. Cloud hosts show as hosting, not VPN.
 - Exchange `SERVICE\` accounts are skipped as service actors.
+- An MFA change after a sign-in from a new network of a provider (ASN) that the user signed in from before, from a clean IP, sends no email (a phone on a mobile carrier).
+- Webhook alerts name the source network.
 
 Management UI:
 
@@ -20,6 +22,7 @@ Management UI:
 
 Security and CI:
 
+- `install.ps1 -HostLogs warnings`: about 85% less log volume (the Functions host logs warnings only).
 - bandit in CI. CodeQL, OpenSSF Scorecard, and attested release archives in a public repository.
 - Docs: a diagram of the architecture and its controls (docs/SECURITY.md), a comparison with Entra ID P2, and revoke timing (continuous access evaluation).
 

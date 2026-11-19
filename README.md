@@ -83,7 +83,7 @@ The monitor can miss a sign-in or stolen session from a residential IP in the us
 
 ## Cost
 
-The software is free under the MIT license. Azure charges were about $1.30–$1.50 per month in two small tenants. See [Costs](docs/ARCHITECTURE.md#costs) for what affects your bill.
+The software is free under the MIT license. Azure charges are about $1.50 per month for a tenant with fewer than 100 users, and a few dollars at 1,000 users. See [Costs](docs/ARCHITECTURE.md#costs) for what affects your bill.
 
 ## Documentation
 
