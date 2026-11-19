@@ -38,17 +38,7 @@ flowchart LR
   func -->|"latest release, no tenant data"| gh
 ```
 
-| Control | What it stops | Where |
-|---|---|---|
-| Managed identity with a federated credential | A stolen or expired secret: there is none | `install.ps1`, `identity.py` |
-| Mail.Send scoped to one Exchange group (default) | Mail sent as any other mailbox | [Limit Mail.Send](HOW_TO.md#limit-mailsend-to-the-alert-mailbox) |
-| Response permissions optional, actions off by default | Account changes that you did not turn on | [Permissions](#permissions) |
-| App Service Authentication, then a role check in code | Access to the management UI by other tenant users | [Management UI](#management-ui) |
-| No storage keys, no SCM or FTP passwords, Entra ID-only telemetry | Key or password theft from settings or logs | `install.ps1` |
-| Azure Monitor alerts outside the app | A stopped, changed, or redeployed monitor that stays silent | [Check that the monitor runs](HOW_TO.md#check-that-the-monitor-runs) |
-| History and an email for each UI change | Silent changes by a UI admin | [Management UI](#management-ui) |
-
-Data that leaves the tenant: IP addresses to proxycheck.io, and one request per day to the GitHub API for the latest release. Audit records are processed in memory. Table Storage keeps one row per alert for 90 days, and short-lived lookups and counts (IP cache, sign-in networks, failed sign-in counts).
+The monitor sends IP addresses to proxycheck.io. The optional update check sends a public release request to GitHub. Alert emails can include audit records. The findings journal can retain audit details for 90 days.
 
 ## Permissions
 
@@ -87,14 +77,14 @@ Protections:
 |---|---|
 | A person who is not an admin signs in | App Service Authentication with Entra ID: no anonymous request reaches the API. The sign-in app does not require assignment, so any user of the tenant can sign in. The code then allows only users with the `Monitor.Admin` role claim, the users listed in Settings > Management UI access, and the members of the directory roles listed there (active, direct role assignments, read from Microsoft Graph). Every other user gets HTTP 403 on each API request. |
 | A forged identity header | The code trusts `X-MS-CLIENT-PRINCIPAL` only if App Service Authentication is on (`WEBSITE_AUTH_ENABLED`). The platform removes that header from client requests. If the code does not detect authentication, the UI returns 404 (fail closed). See [Known limitations](#known-limitations) for Flex Consumption. |
-| Cross-site request forgery | Each change needs the `X-Monitor-Admin` header and a same-origin `Origin`. The CORS list holds only the app's own origin (`install.ps1` adds it), so another site cannot send the header. The UI sends a `Referer` only to its own origin (`Referrer-Policy: same-origin`). A refused change is logged with its Origin and Host. |
-| Script injection | A strict Content-Security-Policy (`script-src 'self'`, no inline script). The page puts all data into the DOM as text, never as HTML. |
+| Cross-site request forgery | Changes require `X-Monitor-Admin: 1`. When a browser sends `Origin`, its host must match an app host. The installer adds the app origin to CORS. Add only origins that serve the management UI. |
+| Script injection | A strict Content-Security-Policy (`script-src 'self'`, no inline script). The page inserts audit data as text. |
 | Clickjacking | `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
 | A silent change by an attacker | Each change is recorded in History and emailed to the alert mailbox. The email links to History. |
 | Recipients changed | The alert mailbox, extra recipients, and the tenant name are UI settings. Each change is recorded in History and emailed. A new alert mailbox must pass a test send before the save, and the old address gets a notice. `install.ps1` sets the Graph permissions. The UI does not set them. |
 | Invalid values | The server checks every value (types, ranges, addresses, country codes, ASNs, alert types). A setting that needs a missing Graph permission is refused. |
 | Detection turned down | Alert types off, allowed IPs, and allowed networks ask for confirmation in the UI, are recorded in History, and are emailed. |
-| Alerts muted | A mute hides medium alerts only, for at most 3650 days, and needs a reason. A mute can be limited to one network (ASN). Each mute is recorded in History and emailed. Muted alerts are still in the findings journal. The weekly and monthly reports list the active mutes. |
+| Alerts muted | A mute requires a reason and expires within 3650 days. A high alert can match only if the mute names one eligible type, one user, and one ASN. History and email record each mute. The journal retains muted findings. |
 | Accounts changed from the UI | The user page can revoke sessions, block or unblock sign-in, and turn inbox rules off or on, only as far as the app's Graph permissions allow. It refuses to block the alert mailbox and the admin's own account. Graph refuses changes to admin accounts. Each action is recorded in History and emailed. |
 | Management UI session | The sign-in (App Service Authentication) lasts 8 hours, or the time set with `./install.ps1 -UiSessionHours`. Blocking an admin or revoking the admin's sessions does not end it. It ends only if Settings > Management UI access > **End the session of a blocked or revoked admin** is on. This setting is off by default. When it is on, each request reads the account from Graph. See [How fast a revoke or block applies](HOW_TO.md#how-fast-a-revoke-or-block-applies). |
 
@@ -108,7 +98,7 @@ There is no client secret and no storage key.
 
 | Item | Where it is | Access |
 |---|---|---|
-| App credential | Nothing is stored. A user-assigned managed identity (`id-<name>`) is the only credential of the app registration (federated identity credential). For a Graph, Office 365 Management API, ARM, or Application Insights token, the app sends the managed identity token as the client assertion | Only code that runs in the Function App can get the managed identity token. Nothing expires or needs rotation |
+| App credential | Nothing is stored. A user-assigned managed identity (`id-<name>`) is the only credential of the app registration (federated identity credential). For a Graph, Office 365 Management API, ARM, or Application Insights token, the app sends the managed identity token as the client assertion | Azure resources assigned this identity can request short-lived tokens. The app has no stored client secret to rotate |
 | Storage access | No key. Shared key access is off after the install. The managed identity has Storage Blob Data Owner and Storage Table Data Contributor on the storage account | Azure RBAC |
 | proxycheck.io API key | Table Storage (`monitoradmin`), written from the management UI (write-only setting) | The UI never shows it again. History and emails show "(set)" or "(replaced)". Readable by code in the Function App and by a person with table data access to the storage account |
 | Function keys | Function App (App keys) | Needed for the script endpoints. Readable by a person with access to the Function App keys (`az functionapp keys list`). `install.ps1` reads the default key to call `/api/status` and `/api/selftest` and does not print it |
@@ -209,30 +199,4 @@ Apply these repository settings (GitHub > Settings):
 
 ## Review history
 
-Earlier reviews fixed: SSRF on content URLs, OData filter injection, error detail in HTTP responses, `/api/recent` parameter checks, IPv4-mapped allowlist bypass, scope case evasion, risk score parse error, secret in logs.
-
-The November 2026 review fixed:
-
-- proxycheck.io key in logs (exception text and urllib3 retry warnings).
-- Inbox rule bypasses: `ForwardAsAttachmentTo` was not checked if `ForwardTo` was set; only the last recipient domain was checked; `UpdateInboxRules` (Outlook and EWS) was not parsed.
-- No detection of mailbox forwarding (`Set-Mailbox`) or of application permission grants (`AppRole.Value`); scopes without a dot (`full_access_as_app`) were not matched.
-- A sign-in mark was able to hide a failed compromise alert for the same event.
-- A missing `Audit.Exchange` subscription stopped all detection. A Graph token failure stopped the run.
-- An outage longer than the lookback lost content with no log entry.
-- `/api/status` reported healthy for a proxycheck.io `denied` status.
-- The Function App accepted plain HTTP.
-
-`tests/test_security_deep.py` has a regression test for each code fix.
-
-A further November 2026 review fixed:
-
-- Wrong-password attempts were able to revoke sessions or block the named account when failed-sign-in email and automatic response were both on. The responder now requires proof of the password for failed sign-ins, regardless of the email setting.
-- Session and mail access checks trusted whole Microsoft-owned networks. Those networks can host attacker-controlled Azure VMs. The checks now inspect client traffic from them. The session check excludes these records:
-  - Exchange Graph REST service records, but only if they have both the client marker and the Graph resource ID.
-  - Records (not sign-ins) from Microsoft 365 server ranges. These ranges are the Office 365 endpoints list minus every Azure service tag range, so they contain no Azure customer space (`microsoft_nets.py`, checked monthly in CI).
-  - Exchange records that a Microsoft-owned service wrote with a token for its own API (`mail_access.relaying_app`). An app of another tenant does not count.
-
-  Known gap: a Power Automate flow that an attacker made also runs as a Microsoft service.
-- The app assumed that X.500 forwarding recipients were internal. A directory contact can deliver externally. The audit rule detector and inbox rule sweep now flag unresolved recipients for verification. An unverified recipient alone is medium and gets no automatic response.
-
-`tests/test_security_regressions.py` covers these cases, their controls, and migration of saved session data.
+See the [changelog](../CHANGELOG.md) for changes. The offline regression tests cover URL and input checks, log redaction, detector parsing, and automatic response eligibility.

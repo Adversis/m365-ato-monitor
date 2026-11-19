@@ -1,8 +1,6 @@
 # Application Insights Queries
 
-Open Azure Portal > Application Insights > Logs. Paste a query.
-
-Each query matches a log message that the code writes. If you change a message in the code, change the query.
+In the Azure portal, open **Application Insights > Logs** for the monitor. Paste a query. Select **Run**.
 
 ## Suspicious sign-ins, last 24 hours
 
@@ -45,7 +43,8 @@ traces
 | where timestamp > ago(30d)
 | where message startswith "Compromise indicator (muted)"
     or message startswith "Compromise indicator (alert turned off)"
-    or message startswith "Suspicious sign-in muted"
+    or message startswith "Suspicious sign-in, no email (muted:"
+    or message startswith "Suspicious sign-in, no email (alert off:"
 | project timestamp, message
 | order by timestamp desc
 ```
@@ -78,7 +77,7 @@ traces
 traces
 | where timestamp > ago(24h)
 | where message startswith "audit_log_monitor run completed"
-| summarize runs = count() by bin(timestamp, 1h)
+| summarize runs = sum(itemCount) by bin(timestamp, 1h)
 | render timechart
 ```
 
@@ -175,7 +174,7 @@ traces
 | order by timestamp desc
 ```
 
-A token failure means that the managed identity or its federated credential is missing. Run `./install.ps1 -Update`.
+Check the error code to identify the cause. For a missing managed identity or federated credential, run `./install.ps1 -Update`.
 
 ## proxycheck.io quota and errors
 

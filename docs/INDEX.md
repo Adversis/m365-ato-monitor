@@ -1,33 +1,12 @@
 # Documentation
 
-The documents follow the [Diataxis](https://diataxis.fr/) types.
-
-## Tutorial
-
-| Document | Content |
+| Task | Guide |
 |---|---|
-| [Getting Started](GETTING_STARTED.md) | Prerequisites, install with install.ps1, dry run, troubleshooting |
-
-## How-to
-
-| Document | Content |
-|---|---|
-| [How-To Guide](HOW_TO.md) | Management UI, settings, allowlists, mutes, response, reports, recipients, Mail.Send restriction, update, uninstall |
-| [Alert Triage](TRIAGE.md) | For each alert: how to check it, contain the account, and when to escalate |
-| [Development](DEVELOPMENT.md) | Dev container, tests, CI |
-
-## Reference
-
-| Document | Content |
-|---|---|
-| [App Insights Queries](APP_INSIGHTS_QUERIES.md) | KQL queries |
-| [API Compatibility](API_COMPATIBILITY.md) | Microsoft and proxycheck.io APIs, record formats |
-| [AGENTS.md](../AGENTS.md) | Instructions for AI assistants: rules, install steps, checks, adding a detection |
-
-## Explanation
-
-| Document | Content |
-|---|---|
-| [README](../README.md) | What it does, detections, limits, setup, FAQ |
-| [Architecture](ARCHITECTURE.md) | Fetch, checkpoint, dedup, detectors, latency, detection limits, Azure resources, costs |
-| [Security](SECURITY.md) | Permissions, credentials and secrets, CI, limitations, review history |
+| Install and verify the monitor | [Getting Started](GETTING_STARTED.md) |
+| Change settings, update, or remove the monitor | [How-To Guide](HOW_TO.md) |
+| Investigate and respond to an alert | [Alert Triage](TRIAGE.md) |
+| Search monitor logs | [Application Insights Queries](APP_INSIGHTS_QUERIES.md) |
+| Review detection limits, Azure resources, or costs | [Architecture](ARCHITECTURE.md) |
+| Review permissions, data handling, or CI controls | [Security](SECURITY.md) |
+| Check API requirements and audit formats | [API Compatibility](API_COMPATIBILITY.md) |
+| Run tests or prepare a release | [Development](DEVELOPMENT.md) |

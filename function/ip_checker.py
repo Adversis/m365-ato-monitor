@@ -380,7 +380,7 @@ def check_ips_batch(ips: list[str], table_client: Optional[TableClient] = None,
 
 def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None,
                       cache_only: bool = False) -> dict[str, dict]:
-    """Look up IPs in the cache, then send the rest to proxycheck.io in one POST.
+    """Look up IPs in the cache, then send the rest in batches to proxycheck.io.
 
     Returns {ip: proxycheck_data}. An IP that is not in the result failed the
     lookup. It is negative-cached for NEGATIVE_CACHE_TTL_MINUTES.
@@ -405,19 +405,27 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
 
     # v3 needs a query string: a POST to a bare /v3/ redirects to a lookup of the caller's own IP.
     url = "https://proxycheck.io/v3/?p=1"
-    if config.PROXYCHECK_API_KEY:
-        url += f"&key={config.PROXYCHECK_API_KEY}"
+    key = config.PROXYCHECK_API_KEY
+    if key:
+        url += f"&key={key}"
+    batch_limit = 1000 if key else 100
+    for start in range(0, len(uncached), batch_limit):
+        batch = uncached[start:start + batch_limit]
+        results.update(_request_proxycheck_batch(url, batch, table_client))
+    return results
 
+
+def _request_proxycheck_batch(url: str, ips: list[str], table_client: Optional[TableClient]) -> dict[str, dict]:
     try:
         # The batch API reads the addresses from the POST form field "ips"
         # (comma-separated). Other formats return "No valid IP Addresses supplied."
-        response = config.http.post(url, data={"ips": ",".join(uncached)}, timeout=15)
+        response = config.http.post(url, data={"ips": ",".join(ips)}, timeout=15)
     except Exception as e:
         # The exception text contains the URL, which contains the key.
         logging.error(f"proxycheck.io batch request failed: {config.redact(e)}")
-        for ip in uncached:
+        for ip in ips:
             cache_ip_negative(ip, table_client)
-        return results
+        return {}
 
     if response.status_code != 200:
         # v3 answers "denied" with HTTP 401, 403, or 429 and "error" with HTTP 400.
@@ -430,9 +438,9 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
         except Exception:
             pass
         logging.warning(f"proxycheck.io batch returned HTTP {response.status_code}{': ' + msg if msg else ''}")
-        for ip in uncached:
+        for ip in ips:
             cache_ip_negative(ip, table_client)
-        return results
+        return {}
 
     try:
         data = response.json()
@@ -440,9 +448,9 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
             raise ValueError("response is not a JSON object")
     except ValueError as e:
         logging.warning(f"proxycheck.io batch returned invalid JSON: {e}")
-        for ip in uncached:
+        for ip in ips:
             cache_ip_negative(ip, table_client)
-        return results
+        return {}
 
     status = str(data.get("status", ""))
     proxycheck_quota.note(table_client, status, data.get("message", ""))
@@ -458,7 +466,8 @@ def _proxycheck_batch(ips: list[str], table_client: Optional[TableClient] = None
         else:
             logging.warning(f"proxycheck.io batch returned status={status}: {msg}")
 
-    for ip in uncached:
+    results = {}
+    for ip in ips:
         ip_data = from_v3(data.get(ip))
         if isinstance(ip_data, dict) and "proxy" in ip_data:
             results[ip] = ip_data

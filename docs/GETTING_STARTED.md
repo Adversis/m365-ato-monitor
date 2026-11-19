@@ -1,19 +1,8 @@
 # Getting Started
 
-`install.ps1` installs M365 ATO Monitor in your Azure subscription. When it is done:
+Install the monitor in an Azure subscription in your Microsoft 365 tenant. The installer creates the Azure resources, grants permissions, and deploys the code.
 
-- An Azure Function reads the Microsoft 365 audit log every 2 minutes.
-- Each account takeover finding (inbox rule, forwarding, app consent, attack tool, and others) sends an email.
-- Each sign-in from a suspicious IP sends an email, or goes into a digest.
-- A report arrives each Monday and on the 1st of each month.
-- Azure Monitor sends an email if the monitor stops or errors repeat.
-- A web management UI shows the health, the alerts, and the settings.
-
-Time: about 10 minutes of work. Microsoft then takes 12–24 hours to deliver the first audit content.
-
-Microsoft 365 commercial cloud only. GCC, GCC High, DoD, and 21Vianet are not supported.
-
----
+Use a Microsoft 365 commercial tenant. GCC, GCC High, DoD, and 21Vianet are outside the supported scope.
 
 ## 1. Prerequisites
 
@@ -24,9 +13,9 @@ Microsoft 365 commercial cloud only. GCC, GCC High, DoD, and 21Vianet are not su
 | PowerShell 7.2 or later | `pwsh --version` | Windows: `winget install --id Microsoft.PowerShell --source winget`. macOS: `brew install powershell` (not `--cask`). Linux: [Install PowerShell on Linux](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux) |
 | Azure CLI 2.60 or later | `az version` | Windows: `winget install --id Microsoft.AzureCLI --source winget`. macOS: `brew install azure-cli`. Linux: [Install the Azure CLI on Linux](https://learn.microsoft.com/cli/azure/install-azure-cli-linux). Older version: `az upgrade` |
 
-Windows PowerShell 5.1 is not enough. Azure Cloud Shell (https://shell.azure.com, PowerShell) has both tools. Python is necessary only for the local tests.
+Use [Azure Cloud Shell](https://shell.azure.com) in PowerShell mode if you cannot install the tools. To clone the repository on your computer, install Git.
 
-Run the commands in PowerShell 7 (`pwsh`). From bash or zsh: `pwsh ./install.ps1`.
+Run the commands in PowerShell 7 (`pwsh`). From bash or zsh, start the installer with `pwsh ./install.ps1`.
 
 ### Azure subscription
 
@@ -75,21 +64,19 @@ Subscriptions > the subscription > **Overview** > **Offer** shows the type (pay-
 
 ### Unified audit logging
 
-The monitor reads the unified audit log. If auditing is off, no content arrives, and each run logs "No login events found."
+Check auditing in every tenant. Microsoft 365 Business plans start with auditing off. See [Microsoft's audit logging instructions](https://learn.microsoft.com/purview/audit-log-enable-disable).
 
-Auditing is off by default with Business Basic, Business Standard, and Business Premium, and in enterprise trial tenants. An admin or a partner can change it, so check it in each tenant:
+1. In Microsoft Purview, open **Solutions > Audit**.
+2. If you see **Start recording user and admin activity**, select it.
 
-- Microsoft Purview portal > **Solutions > Audit**. If the page shows **Start recording user and admin activity**, auditing is off. Select it to turn it on.
-- Or Exchange Online PowerShell (not Security & Compliance PowerShell, which always shows `False`):
+You can also use Exchange Online PowerShell. Check the setting first. Run the second command if the result is `False`.
 
-  ```powershell
-  Get-AdminAuditLogConfig | Format-List UnifiedAuditLogIngestionEnabled
-  Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true
-  ```
+```powershell
+Get-AdminAuditLogConfig | Format-List UnifiedAuditLogIngestionEnabled
+Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true
+```
 
-The change can take 60 minutes to apply.
-
-In a new tenant, both ways can ask you to run `Enable-OrganizationCustomization` first. Run it once in Exchange Online PowerShell. Then turn on auditing again. It can take some minutes to several hours. Until then, the same message comes back. `Get-OrganizationConfig | Format-List IsDehydrated` shows `False` when it is done.
+Allow up to 60 minutes for the change to apply. If Exchange asks for `Enable-OrganizationCustomization`, run it once. Wait until `Get-OrganizationConfig | Format-List IsDehydrated` returns `False`. Then try to turn on auditing again.
 
 ### Azure region
 
@@ -107,8 +94,6 @@ A licensed or shared mailbox in the tenant. The monitor sends every email as thi
 
 Without a key, proxycheck.io allows 100 IP lookups per day. A free key allows 1,000. Register at the [proxycheck.io dashboard](https://proxycheck.io/dashboard/). Confirm your email address. Copy the key. You enter it in the management UI after the install ([Enter the proxycheck.io key](#enter-the-proxycheckio-key)).
 
----
-
 ## 2. Install
 
 ```powershell
@@ -117,9 +102,13 @@ cd m365-ato-monitor
 ./install.ps1 -AdminEmail security@contoso.com -Location eastus
 ```
 
-You do not need `az login` first: the script signs in to the tenant of `-AdminEmail`. It asks for each value that you do not give: the region, the alert mailbox, and the response permissions (revoke sessions, block sign-in, turn off inbox rules). The response actions stay off until you turn them on. Then it shows the plan and asks "Continue?".
+The script uses your Azure CLI sign-in or opens a browser to sign in. To select a different tenant, pass `-Tenant <domain>`.
 
-The script prints 9 numbered steps ([section 3](#3-see-each-step-before-you-install-dry-run)). If the Azure CLI is signed in to another tenant, or the alert mailbox is not a mailbox of the tenant, it stops before any change. If a step fails, it prints `ERROR` and `Fix`. Do the fix. Then run the script again. Each step continues from what exists. A rerun keeps the settings of the management UI.
+1. Review the tenant, subscription, alert mailbox, and permissions in the plan.
+2. Answer the **Continue?** prompt.
+3. With the default mailbox scope, open the Exchange Online sign-in URL that the installer prints. Enter the code. Use an account in the tenant shown in the plan.
+
+Automatic response starts off. If a step fails, follow the `Fix` message. Then run the same command again. The script reuses existing resources and keeps management UI settings.
 
 ### Parameters
 
@@ -164,7 +153,7 @@ Each tenant gets its own installation, in an Azure subscription of that tenant. 
 5. The alert subjects start with the organization name: `[M365 Alert][Fabrikam]`.
 6. At the end, the Azure CLI goes back to the subscription that you used before.
 
-Each installation is saved in `~/.m365-ato-monitor/tenants.json` (tenant, subscription, `-Name`, and region, with no secrets):
+Each installation is saved in `~/.m365-ato-monitor/tenants.json` (tenant, subscription, `-Name`, and region).
 
 - `./install.ps1 -List` shows them.
 - `./install.ps1 -Tenant fabrikam -Update` updates one. A short name works when it matches a saved installation.
@@ -174,20 +163,11 @@ The Azure CLI keeps each sign-in for 90 days of no use. On another computer, run
 
 ### Check the status
 
-At the end, the script shows the checks of `/api/status`. `./install.ps1 -Verify` shows them again:
+Run `./install.ps1 -Verify` to check the service and run the detector self-test. If `/api/status` gives no answer, wait a few minutes for role assignments to apply. Then run the command again.
 
-```
-  OK    azure_ad_token: ok
-  OK    o365_api_aad: ok (0 content blobs in last 60 min)
-  OK    o365_api_exchange: ok (0 content blobs in last 60 min)
-  OK    graph_api_token: ok
-  OK    table_storage: ok (0 events processed in last 24h)
-  OK    proxycheck_io: ok (status=ok)
-```
+The first monitor run starts the audit subscriptions. Until then, `o365_api_*` can show `AF20022` or `AF20023`. A result of `0 content blobs` is normal while Microsoft prepares the first content.
 
-"0 content blobs" is normal for the first 12–24 hours. `o365_api_*` can show `AF20022` or `AF20023` for some minutes: the first monitor run starts the audit subscriptions. If `/api/status` does not answer, wait some minutes. Role assignments take time to apply. Then run `./install.ps1 -Verify`.
-
-Without `-Yes`, the script then waits up to 10 minutes for the first monitor run. Ctrl+C stops the wait. The install is complete at that point. After the run, the script runs the self-test. Then it asks whether to send one test email for each alert type.
+Without `-Yes`, the installer waits up to 10 minutes for the first run. Press Ctrl+C to stop the wait after deployment. After the first run, the installer runs the self-test and offers to send test emails.
 
 ### Open the management UI
 
@@ -201,67 +181,36 @@ Management UI > Settings > Suspicious sign-ins > **proxycheck.io API key**. Past
 
 ### Run the self-test
 
-The self-test sends a synthetic audit record for each alert type through the real detectors (test IPs and `.invalid` domains):
-
-```powershell
-./install.ps1 -Verify                    # each alert type, no email
-./install.ps1 -Verify -SendTestAlerts    # each alert type, one email each
-```
-
-Or: Management UI > Overview > **Test alerts**. Each type must show `detected`, then "Self-test passed". With `-SendTestAlerts`, the alert mailbox gets one email per type, with `[SELF-TEST]` in the subject.
+Follow [Test the alerts](HOW_TO.md#test-the-alerts). Use the synthetic test to check the detectors and email delivery.
 
 ### Do the next steps
 
-1. Enter the proxycheck.io key.
-2. Add a mail rule so that `[M365 Alert]` mail does not go to junk mail.
-3. Check that unified audit logging is on ([Unified audit logging](#unified-audit-logging)).
-4. With the default `-MailSendScope mailbox`, Exchange applies the Mail.Send grant in 30 minutes to 2 hours. Until then, emails wait in the outbox. To change the alert mailbox later, add the new one to the group `<name>-senders` first ([How-To](HOW_TO.md#change-the-alert-mailbox)).
-
----
+1. Add a mail rule to keep `[M365 Alert]` mail out of junk.
+2. If you use an IP lookup key, [enter it in the management UI](#enter-the-proxycheckio-key).
+3. With mailbox-scoped Mail.Send, allow 30 minutes to 2 hours for Exchange to apply the permission. Alerts can wait in the outbox during this time.
 
 ## 3. See each step before you install (dry run)
 
-A dry run shows each change and makes none. It reads Azure and Entra ID, so it needs a sign-in. Use it to review the changes yourself, or with a colleague or an AI assistant.
+A dry run reads Azure and Entra ID to show its plan. Use an Azure CLI sign-in with access to the target subscription.
 
 ```powershell
 ./install.ps1 -DryRun -AdminEmail security@contoso.com -Location eastus
 ```
 
-`PLAN` is a change that the real run makes (it shows `DO`). `OK` is something that exists or a check that passed. New objects show the ID `00000000-0000-0000-0000-000000000000`.
-
-| Step | What the script does |
-|---|---|
-| `[1/9] Check the tools and the Azure sign-in` | Checks the versions. Signs in if necessary. Shows the account, the tenant, and the subscription |
-| `[2/9] Choose the settings` | Checks the region and the alert mailbox. Shows the plan: tenant, resource group, Function App, alert mailbox, Mail.Send scope, Graph roles. Asks "Continue?" |
-| `[3/9] Register the resource providers` | `Microsoft.Web`, `Microsoft.Storage`, `Microsoft.Insights`, `Microsoft.OperationalInsights`, `Microsoft.ManagedIdentity` |
-| `[4/9] Create the Azure resources` | Resource group `rg-<name>`, managed identity `id-<name>`, storage account `st<name><6 hex>` (TLS 1.2, HTTPS only, no public blobs; shared keys stay on until step 8 because `az functionapp create` needs them), the storage data roles for the identity, Log Analytics `log-<name>` (90 days), Application Insights `appi-<name>`, and Monitoring Metrics Publisher on it for the identity |
-| `[5/9] Create the Function App` | `func-<name>-<6 hex>`: Flex Consumption, Linux, Python 3.12, 512 MB, HTTPS only, with the managed identity |
-| `[6/9] Create the app registrations and grant admin consent` | App registration `<name>`, whose only credential is the managed identity. Admin consent. With `-MailSendScope mailbox` (not with `-Update`): the Exchange Online sign-in, the group `<name>-senders`, the management scope, and the role assignment "Application Mail.Send". Then the script removes the Graph `Mail.Send`. App registration `<name>-admin-ui` for the management UI sign-in. Monitoring Reader on Application Insights |
-| `[7/9] Set up the health alerts` | Action group `ag-<name>` (email to the alert mailbox). Alerts `alert-<name>-no-runs` and `alert-<name>-errors`. Monitoring Contributor on the action group |
-| `[8/9] Configure the Function App` | Waits until the Monitoring Metrics Publisher role is 5 minutes old (first run only). App settings (no key, no secret). Shared keys off. Application Insights accepts telemetry with Entra ID only. App Service Authentication for `/api/manage`. The app's own origin in CORS. Deployment with a password off. The change alerts: `alert-<name>-azure-change` and `alert-<name>-code-deployed` (with the storage logs and the workspace transformation) |
-| `[9/9] Deploy the code and check the status` | Starts the app if it is stopped. Deploys the `function` folder (remote build). Shows `/api/status` |
-
-`<6 hex>` comes from the subscription ID and the name, so a rerun finds the same resources.
-
----
+`PLAN` identifies a proposed change. `OK` identifies an existing resource or a passed check. Review the [resource list](ARCHITECTURE.md#infrastructure-installps1) and the [permissions](SECURITY.md#permissions) before installation.
 
 ## 4. After installation
 
-| Time | What happens |
+| When | What to expect |
 |---|---|
-| First run | The monitor starts the audit subscriptions. It checks them every 6 hours |
-| First audit content | Setup confirmation email |
-| 10–60 minutes after the first run | "Starting state" email: the inbox rules of every mailbox, the audit history that Microsoft still has, and manual checks. Triage each item ([Alert Triage](TRIAGE.md)) |
-| 0–24 hours | Runs log "No login events found." This is normal |
-| After 12–24 hours | Audit content arrives. Alerts start. VPN users can cause sign-in alerts |
-| First 14 days | The monitor learns each user's countries. No new-country alerts, unless `HOME_COUNTRIES` is set |
-| Each Monday, 07:17 UTC | Weekly report. If it does not arrive, the monitor did not run |
-| 1st of each month, 08:00 UTC | Monthly report for the last 30 days |
-| No run for 1 hour | Azure Monitor "no-runs" email |
-| 5 or more errors in 1 hour | Azure Monitor "errors" email. Run the [Errors query](APP_INSIGHTS_QUERIES.md#errors) |
-| No audit content for 48 hours | An error in the log, then the "errors" email. Check unified audit logging |
+| First run | The monitor starts the audit subscriptions and queues the onboarding scan. |
+| First audit content | The monitor sends a setup email. Microsoft documents up to 12 hours for first content. In observed installs, it can take 12–24 hours. |
+| Onboarding scan complete | The monitor sends a Starting state report. [Review the findings](TRIAGE.md). |
+| First 14 days | The monitor learns each user's countries. Set home countries to enable new-country alerts during this period. |
+| Mondays at 07:17 UTC | Weekly report, if enabled. |
+| First day of the month at 08:00 UTC | Monthly report. |
 
----
+If a report is missing, [check that the monitor runs](HOW_TO.md#check-that-the-monitor-runs). See [Microsoft's Activity API description](https://learn.microsoft.com/office/office-365-management-api/office-365-management-activity-api-reference) for initial content delivery.
 
 ## 5. Settings
 
@@ -283,7 +232,7 @@ The defaults come from `function/config.py`, or from a Function App setting that
 | `LOOKBACK_MINUTES` | 8 | Minutes of content each run fetches (3–60) |
 | `IP_CACHE_DAYS` | 7 | Days to keep a proxycheck.io answer for an IP that is not flagged (1–7). A flagged answer: 24 hours |
 | `LOGIN_ALERT_CONFIDENCE` | low | Sign-in emails: `low` (all), `medium`, `high`, `off` |
-| `LOGIN_ALERT_FAILED` | false | Also email failed sign-ins (wrong password) from a suspicious IP, an automation client, or an attack tool. A correct password stopped by MFA always sends email |
+| `LOGIN_ALERT_FAILED` | false | Include wrong-password attempts in suspicious IP, automation-client, and attack-tool emails. The normal alert rules still apply to MFA and Conditional Access blocks |
 | `LOGIN_ALERT_MODE` | immediate | `immediate` (one email per sign-in) or `digest` |
 | `LOGIN_DIGEST_MINUTES` | 60 | Digest mode: age of the oldest queued sign-in before the digest goes |
 | `GEO_ANOMALY_ENABLED` | true | Alert on a sign-in from a country that is new for the user |
@@ -325,8 +274,6 @@ The response settings need the response permissions (`-ResponsePermissions yes`)
 | `ACTION_GROUP_ID` | The health alert action group |
 | `ADMIN_UI_ENABLED`, `MONITOR_HOSTNAME` | The management UI and the links in emails |
 | `MAIL_SEND_SCOPE`, `MAIL_SEND_GROUP`, `RESPONSE_PERMISSIONS` | The choices of `-MailSendScope` and `-ResponsePermissions` |
-
----
 
 ## 6. Troubleshooting
 
@@ -427,8 +374,6 @@ az config set core.encrypt_token_cache=false
 az logout
 az login
 ```
-
----
 
 ## 7. Remove the monitor
 

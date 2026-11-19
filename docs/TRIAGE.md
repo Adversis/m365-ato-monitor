@@ -1,37 +1,27 @@
 # Alert Triage
 
-Use this guide when an alert email arrives. It tells you how to find out if an alert is real, how to contain an account, and when to get help. An AI assistant that helps you must also follow [For AI assistants](#for-ai-assistants).
-
-The monitor detects attacker actions. It does not prevent them. An alert arrives when Microsoft publishes the audit record: often within minutes, sometimes 1–2 hours or more after the event. All times in the emails are UTC.
+Use this guide to investigate an alert and contain an account. Alert times are in UTC. If you use an assistant, see [For AI assistants](#for-ai-assistants).
 
 ## First five minutes
 
-Do these steps for each alert.
+If the subject contains `[SELF-TEST]`, the message is a test. For other alerts, do these steps.
 
-1. Read the subject: `[M365 Alert] <SEVERITY>: <alert type> - <user>`. If a tenant name is set (Settings > Email), the name follows the tag: `[M365 Alert][Contoso] HIGH: ...`.
-   - If the subject has `[SELF-TEST]`, the alert is a test. No action is necessary.
-   - The user in the subject depends on the alert type. For a sign-in, a mailbox rule, or forwarding, it is the affected account. For an admin-type change (roles, mail flow rules, domains, audit, mail protection, app credentials, mailbox access), it is the account that made the change. For an MFA method change, it is the account whose methods changed.
-2. Read the first sentence of the email. It says what happened.
-3. Read the colored notices:
-   - The IP notice, for example "Source IP is VPN (...)" or "Source IP country BR is new for this user". This notice made the alert high.
-   - The "Automatic response" notice says what the monitor did. If a step "Failed", do it by hand. An automatic response does not finish the work.
-   - The "other alerts for this user in the last 24 hours" notice lists the earlier alerts about the same user. Two or more alerts about one user in 24 hours are one incident. Triage them together.
-4. Read "What to do". If the first step starts with "If no one on your team made this change", confirm with the person who made it before you act.
-5. Open the "Audit record" section (compromise alerts only). Read the fields that the section for the alert type (below) names. The suspicious sign-in and new-country emails have no audit record. For these emails, search Microsoft Purview > Audit for the record.
-   The button "Open in the management UI" opens the user page. It shows all alerts about the user for 90 days, the user's sign-in countries, and the inbox rules. It has buttons to revoke sessions, block sign-in, and turn off an inbox rule.
-6. Decide:
+1. Read the severity and the first sentence of the email.
+2. Identify the affected account and the account that made the change. The subject can name either account.
+3. Review any IP details and automatic response results. Check related alerts from the last 24 hours.
+4. Follow **What to do** in the email. When asked, confirm the change by phone or in a chat that you trust.
+5. Review the fields for the [alert type](#alert-types). For sign-in or new-country emails, find the audit record in **Microsoft Purview > Audit**.
+6. Open the user's page in the management UI. Review the alert history before you decide:
 
    | Decision | When | Next step |
    |---|---|---|
    | Real | The user or admin did not make the change, or the record shows signs of an attacker | [Contain an account](#contain-an-account) |
    | Expected | The user, or the admin who made the change, confirms it through a channel other than email | [Options for expected alerts](#options-for-expected-alerts) |
-   | Not sure | You cannot reach the person, or the facts do not agree | Contain the account. Revoking sessions costs the user one sign-in |
+   | Not sure | You cannot reach the person, or the facts do not agree | [Contain the account](#contain-an-account) |
 
 7. Write down the alert, the time, your decision, and who confirmed it.
 
-Ask the user by phone, in person, or in a chat that you trust. Do not ask by email. An attacker can read and answer the mail of a compromised account.
-
-"Source IP: not in the record" is normal for Entra ID admin changes. In that case, the IP cannot make the alert high.
+An attacker can read and answer email on a compromised account. Use another channel to confirm a change.
 
 ### Other emails
 
@@ -40,7 +30,7 @@ Ask the user by phone, in person, or in a chat that you trust. Do not ask by ema
 | `[M365 Alert] Settings changed by <user>` | Someone changed a setting in the management UI | If you did not expect it, undo it in the management UI. Check who has access: Settings > Management UI access, and the Monitor.Admin role. An attacker in the UI can weaken detection |
 | `[M365 Alert] Alerts muted by <user>`, `Mute ended by <user>` | Someone added or ended a mute in the management UI | If you did not expect it, end the mute (Management UI > Mutes). Check who has access: Settings > Management UI access, and the Monitor.Admin role |
 | `[M365 Alert] Response action by <user>` | Someone revoked sessions, blocked or unblocked sign-in, or turned an inbox rule off or on in the management UI | If you did not expect it, check the user in the management UI and the History |
-| `[M365 Monitor] Weekly report` | Each Monday: the monitor ran, how many sign-ins it checked, the week's alerts, and settings that weaken protection | If "Check these" is shown, read it. If the report does not arrive on a Monday, the monitor did not run |
+| `[M365 Monitor] Weekly report` | Run counts, sign-ins, alerts, and settings to review | Read **Check these**. If the report is missing, [check the report setting and monitor health](HOW_TO.md#receive-the-weekly-report) |
 | `[M365 Monitor] Starting state` | The onboarding scan finished: past audit records, inbox rules of all mailboxes, and manual checks | Triage each item as an alert. Do the manual checks one time |
 | `[M365 Monitor] Monthly report` | The 1st of each month: counts for 30 days, and settings that weaken protection | No action unless it shows items to review |
 | Azure Monitor `alert-<name>-no-runs` or `alert-<name>-errors` | The monitor stopped, or errors repeat | Run `./install.ps1 -Verify`. See [Getting Started: Troubleshooting](GETTING_STARTED.md#6-troubleshooting) |
@@ -111,14 +101,14 @@ After containment, watch for new alerts about the user for some days. Tell the u
 
 ## Alert types
 
-Every compromise alert, except session reuse and mail access, becomes high if its source IP is a VPN, proxy, or hosting address, or is in a country that is new for the user.
+IP reputation and a new country can raise the severity of a compromise finding. The table gives the severity before this check.
 
 | Type | Subject text | Severity | Confirm first | Automatic response |
 |---|---|---|---|---|
 | [`suspicious_signin`](#suspicious_signin) | Suspicious sign-in | Low, medium, or high (IP confidence) | — | None |
 | [`new_country`](#new_country) | Sign-in from new country | High | — | `ANOMALY_ACTION` |
 | [`session_reuse`](#session_reuse) | Session reuse | High, or medium | No | If high |
-| [`mail_access`](#mail_access) | Mail access from a risky IP | High or medium | No | If high |
+| [`mail_access`](#mail_access) | Mail access from a risky IP | High or medium | No | No |
 | [`legacy_auth`](#legacy_auth) | Legacy auth sign-in | High | No | If high |
 | [`device_code`](#device_code) | Device code sign-in | Medium | Yes | If high |
 | [`attack_tool`](#attack_tool) | Attack tool sign-in | High | No | If high |
@@ -136,7 +126,7 @@ Every compromise alert, except session reuse and mail access, becomes high if it
 | [`mail_protection_weakened`](#mail_protection_weakened) | Mail protection | High or medium | Yes | No |
 
 - **Confirm first:** the email asks you to confirm with the person who made the change before you treat the account as compromised.
-- **Automatic response:** off by default. If `COMPROMISE_ACTION` is set, a high alert of this type revokes sessions (or blocks sign-in and revokes sessions) for the affected account. The affected account is the account that signed in, or the account that was changed if the same account made the change. A change that one account made to another gets no action. The monitor does not change exempt accounts, the alert mailbox, or admin accounts. The default limit is 3 account actions per day.
+- **Automatic response:** off by default. If `COMPROMISE_ACTION` is set, a high alert of this type revokes sessions (or blocks sign-in and revokes sessions) for the affected account. Automatic response applies to eligible sign-ins and changes a user makes to their own account. The alert mailbox and exempt accounts are protected. The default limit is 3 account actions per day.
 
 <a id="suspicious_signin"></a>
 ## suspicious_signin — Suspicious sign-in
@@ -214,7 +204,7 @@ Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used
 
 **Common benign causes.** The user turned a VPN on or off while the browser was open. A company proxy or web gateway with exits in other countries. Travel. Wrong geolocation on a mobile network.
 
-**If real.** [Contain the account](#contain-an-account). Revoke sessions first: that ends the stolen session. A password reset alone does not. Find the phishing email. Find who else got it: Exchange admin center > Mail flow > Message trace.
+**If real.** [Contain the account](#contain-an-account). Revoke sessions. Issued access tokens can stay valid while the change applies. Find the phishing email. Use **Exchange admin center > Mail flow > Message trace** to find other recipients.
 
 **If benign.** Add fixed company VPN or proxy IPs to **Allowed IPs and ranges**: the session check ignores them. Approving a country for the user makes the alert medium. It does not stop it.
 
@@ -236,7 +226,7 @@ Subject: `[M365 Alert] MEDIUM: Mail access from a risky IP - <user>` (or HIGH). 
 
 **Common benign causes.** A VPN that the user turned on after they signed in. Outlook mobile on a VPN or a mobile network that a lookup service classifies as hosting. A travel router or hotel network.
 
-**If real.** [Contain the account](#contain-an-account). Revoke sessions first: that ends the stolen session or token. Tell the recipients of the sent mail that it is not genuine. Look for payment or bank detail changes in the threads.
+**If real.** [Contain the account](#contain-an-account). Revoke sessions. Tell recipients which messages came from the attacker. Check the threads for payment or bank detail changes.
 
 **If benign.** Add the company VPN to **Allowed networks (ASNs)** or **Allowed IPs and ranges**. Mute a medium alert for one user for some days ([Mutes](HOW_TO.md#mute-an-expected-alert)).
 

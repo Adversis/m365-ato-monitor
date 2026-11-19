@@ -106,6 +106,28 @@ def _resp(status_code, body):
     return r
 
 
+@pytest.mark.parametrize("key,limit", [("", 100), ("test-key", 1000)])
+@pytest.mark.parametrize("last_status", [200, 429])
+def test_batch_obeys_request_limit_and_keeps_partial_results(key, limit, last_status):
+    ips = [f"2001:db8::{i:x}" for i in range(1, limit + 2)]
+    batches = []
+    answer = _v3()
+
+    def post(url, *, data, timeout):
+        batch = data["ips"].split(",")
+        batches.append(batch)
+        if len(batches) == 2 and last_status == 429:
+            return _resp(429, {"status": "denied", "message": "Daily quota exhausted"})
+        return _resp(200, {"status": "ok", **dict.fromkeys(batch, answer)})
+
+    with patch("config.PROXYCHECK_API_KEY", key), patch("private_relay.country", return_value=""), \
+         patch.object(config.http, "post", side_effect=post):
+        results = ip_checker.check_ips_batch(ips)
+
+    assert batches == [ips[:limit], ips[limit:]]
+    assert set(results) == set(ips if last_status == 200 else ips[:limit])
+
+
 def test_batch_uses_v3_and_caches_the_v2_shape():
     cache = FakeTable()
     body = {"status": "ok", "203.0.113.9": _v3(tor=True, anonymous=True, risk=75),

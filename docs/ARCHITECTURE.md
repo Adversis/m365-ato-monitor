@@ -4,62 +4,13 @@ How the M365 ATO Monitor works.
 
 ## Overview
 
-```
-                 every 2 minutes
-                       │
-                       ▼
-          ┌──────────────────────────┐
-          │ audit_log_monitor        │  Azure Function (Flex Consumption), timer trigger
-          │ 0. check subscriptions   │  (first run, then every 6 hours)
-          │ 1. fetch each type       │──── Management Activity API
-          │ 2. login IP check        │     (Audit.AzureActiveDirectory, Audit.Exchange)
-          │ 3. compromise check      │
-          │ 4. digest flush          │
-          │ 5. write checkpoints     │
-          └────────────┬─────────────┘
-                       │
-       ┌───────────────┼────────────────┬─────────────────┐
-       ▼               ▼                ▼                 ▼
- proxycheck.io   Table Storage     Graph sendMail   Application Insights
- (IP reputation) (dedup, cache,    (alerts)         (logs, roll-up source)
-                  checkpoint,                             │
-                  digest queue)                           ▼
-                                               Azure Monitor alert (no runs in 1 h)
+The `audit_log_monitor` timer runs every 2 minutes. It fetches Entra ID and Exchange audit content. It checks sign-ins, sessions, mail access, and changes that can indicate compromise. It then sends alerts or adds them to a queue and saves a checkpoint for each content type.
 
-All tokens come from the user-assigned managed identity: Table Storage directly,
-Graph, Management API, ARM, and App Insights through the app registration
-(managed identity token = client assertion). No secret, no storage key.
-```
+The monitor uses Table Storage for state and sends logs to Application Insights. Azure Monitor uses those logs for health alerts. See [Security](SECURITY.md#architecture-and-controls) for the data flow and authentication.
 
 ## Modules
 
-```
-function/
-├── function_app.py         # Triggers, HTTP endpoints, pipeline, checkpoint
-├── config.py               # Settings, thresholds, HTTP session with retry, allowlist, redact()
-├── identity.py             # Managed identity tokens: client assertion, Table Storage credential
-├── o365_client.py          # Tokens, audit subscriptions, Management API fetch, SSRF guard, Graph user lookup
-├── ip_checker.py           # IP parsing, proxycheck.io, IP cache, dedup, digest queue
-├── compromise_detector.py  # 13 detectors: inbox rules, forwarding, consents, MFA, roles, ...
-├── geo_monitor.py          # Per-user sign-in country baseline, anomaly detection
-├── session_monitor.py      # One Entra session in two countries, or moved to a risky IP (stolen cookie or token)
-├── responder.py            # Response: revoke sessions, block sign-in (automatic or from the UI)
-├── journal.py              # Findings journal (90 days): incident context, user page, weekly report
-├── mailbox_rules.py        # Inbox rules through Graph: list, assess, turn off or on
-├── onboarding.py           # Onboarding scan: audit history, inbox rule sweep, audit search, starting-state report
-├── audit_search.py         # Graph audit log search (up to 180 days): onboarding history, user page audit log
-├── failed_signins.py       # Failed sign-ins per day (Overview: password spraying, no alerts)
-├── mail_access.py          # MailItemsAccessed and Send counts per day (is mail access logged?)
-├── settings.py             # Runtime settings: schema, validation, defaults, overrides
-├── admin_store.py          # Table Storage for the UI: overrides, history, email journal, mutes, audit searches
-├── admin_api.py            # Management UI: auth checks and JSON API
-├── ui/                     # Management UI page (index.html, app.js, app.css)
-├── insights_client.py      # App Insights query for the weekly and monthly reports
-├── health_alerts.py        # Set the action group email when the alert mailbox changes
-└── alerting.py             # Graph sendMail: alerts, digest, reports, posture, recipients
-```
-
-Dependencies: `config` ← `o365_client`, `ip_checker` ← `compromise_detector`, `alerting`, `insights_client` ← `function_app`. There are no cycles.
+See the [repository map](../AGENTS.md#repository-map) for the source files and their roles.
 
 ## Runtime settings
 
@@ -67,24 +18,9 @@ Dependencies: `config` ← `o365_client`, `ip_checker` ← `compromise_detector`
 
 ## Management UI
 
-The management UI has routes under `/api/manage`: the page, the script, the style, and a JSON API. The Function App has App Service Authentication with an Entra ID app registration (`<name>-admin-ui`, no assignment required). The script endpoints (`/api/status`, `/api/health`, `/api/recent`, `/api/test`, `/api/selftest`) and the host admin API (`/admin/*`) are excluded. They keep function keys.
+The page and JSON API use `/api/manage`. App Service Authentication signs users in through Entra ID. The app checks access on each request. See [Management UI controls](SECURITY.md#management-ui).
 
-Each API request checks these conditions:
-
-- App Service Authentication is on (`WEBSITE_AUTH_ENABLED`). If the setting is missing, the request fails closed.
-- The user is signed in.
-- The user has access (`ui_access.py`): the `Monitor.Admin` role, a listed user principal name (`UI_ADMIN_USERS`), or an active, direct assignment of a listed directory role (`UI_ADMIN_ROLES`, read from Microsoft Graph and cached 5 minutes).
-
-A request that changes data also needs the `X-Monitor-Admin` header and a same-origin `Origin`. The Function App's CORS list has its own origin (`install.ps1`). Without it, the Functions host refuses each change request with HTTP 403 before the code runs.
-
-Views:
-
-- Overview: status, alerts of the week, mail access logging, tools, onboarding scan.
-- Alerts: the findings journal, in pages, with a triage state per alert (Open, Investigating, Benign, Resolved).
-- Users: one user's alerts, countries, inbox rules, audit log search, and the actions revoke sessions, block or unblock sign-in, turn a rule off or on.
-- Mutes, Settings, Countries, History.
-
-Each change (settings, countries, mutes, response actions) is recorded in History and emailed. A triage change is recorded in History with no email, because it does not change detection. Each audit log search is recorded in History. The last search per user is kept 30 days (`monitoradmin` / `searches`), so the page shows it again.
+The monitor records settings, countries, mutes, triage, response actions, and audit searches in History. Changes to settings, countries, mutes, and accounts also send email. Table `monitoradmin` keeps the last audit search per user for 30 days.
 
 ## Findings journal
 
@@ -124,7 +60,7 @@ A new start writes a new run ID. A step that finds another run ID stops. The sta
 
 ## Audit subscriptions
 
-The function starts the audit subscriptions itself (`o365_client.ensure_subscriptions`). There is no setup script. On the first run, and then every 6 hours, it lists the subscriptions and starts each content type that is not enabled. After an `AF20022` (no subscription) or `AF20023` (subscription disabled) error, it checks at once. Microsoft takes up to 12 hours (often 12–24) to deliver the first content after a subscription starts. The subscriptions are tenant-level. `install.ps1 -Uninstall` does not stop them. They cost nothing.
+The function checks audit subscriptions on its first run and every 6 hours. It starts missing or disabled subscriptions. An `AF20022` or `AF20023` error triggers another check. Audit subscriptions belong to the tenant and stay active after uninstall. See [first content delivery](GETTING_STARTED.md#4-after-installation).
 
 ## Fetch and checkpoint
 
@@ -215,7 +151,7 @@ A token refresh is a non-interactive sign-in, which is not in the unified audit 
 
 All AAD and Exchange records go to 13 detectors. A record that a detector cannot parse is logged and skipped. One detector failure does not stop the others.
 
-Two kinds of finding are journaled without an email:
+The monitor can journal a finding without sending email in these cases:
 
 - A permission that `install.ps1` grants to the monitor app (status `install`). The record must name the monitor app by its app ID or service principal ID, and grant only roles in `INSTALL_ROLES`.
 - An MFA method added or changed on one account (status `known sign-in`, `function_app._context_review`). The record (`Update user.`) has no IP. The person who signed in is the user (My Sign-ins: the MFA service writes the record) or the admin who changed the user's methods.
@@ -259,18 +195,11 @@ Two kinds of finding are journaled without an email:
 
 Most tenant-level changes are rare in a small tenant, so one change is an alert. An admin or the user can make some changes on purpose: all types except inbox rules, mailbox forwarding, OAuth consents, attack tools, legacy authentication, and session reuse. The alert email for such a change asks the reader to confirm before they treat the account as compromised.
 
-The detectors were compared with public detection content for the same audit records: Elastic prebuilt rules (`rules/integrations/o365`), Splunk Security Content (`detections/cloud/o365_*`), Sigma (`rules/cloud/m365`), and the Wazuh Office 365 ruleset. Rules that need data this tool does not read (Defender alerts, SharePoint, message trace) are not included.
-
 The run looks up the source IP of each new finding. If the IP is a proxy or hosting address, or its country is new for the user, the severity becomes high and the email shows the IP context. A record with a Microsoft service IP (the same test as the session check, `mail_access.service_ip_client`) is not looked up and does not raise the severity. For example, a rule changed in Outlook mobile shows the IP of Microsoft's server. The content of the finding still sets its severity.
 
 ## Latency
 
-An alert arrives after Microsoft publishes the audit record, plus up to 2 minutes. Two delays add up:
-
-1. **Microsoft audit pipeline.** Microsoft gives no guaranteed latency. Its documentation gives 60–90 minutes as typical for core services. In practice, many records arrive within about 10 minutes. Some take 1–2 hours or more, and outages take longer. A late record is not lost: the API lists content by the time it became available, so a later run gets it.
-2. **Polling interval.** The function runs every 2 minutes.
-
-To block a sign-in in real time, use Conditional Access (Entra ID P1).
+Microsoft publishes audit records before the monitor can evaluate them. Delivery can take minutes or hours. The 2-minute polling interval adds time after delivery. The API lists content by availability time, so later runs can fetch records that Microsoft publishes late.
 
 ## Detection limits
 
@@ -288,7 +217,7 @@ What the monitor does not detect:
 - Signals that need Entra ID P1/P2 or Defender: risk scores, Conditional Access results, device compliance, Defender alerts.
 - SharePoint, OneDrive, and Teams activity.
 
-The tool detects attacker actions after access. It does not prevent an attack. An optional automatic response (off by default) revokes sessions or blocks sign-in after a high account-takeover alert or a new-country sign-in, and turns off a malicious inbox rule. It never changes a password.
+Automatic response acts after detection. See [Automatic response](HOW_TO.md#respond-automatically-to-account-takeover-alerts).
 
 The responder rejects failed sign-ins that do not prove the password, independently of `LOGIN_ALERT_FAILED`. That setting controls email only. Successful sign-ins and correct passwords stopped by MFA or Conditional Access remain eligible for the configured response.
 
@@ -378,7 +307,7 @@ Measured in two small tenants, 1–18 November 2026 (Azure Cost Management, actu
 | Log Analytics ingestion | $0 | 5 GB per billing account and month | 0.4 GB in 18 days, about 15% of the allowance. Above it: about $2.30 per GB. Retention: 90 days (`install.ps1`) |
 | Activity log alert, proxycheck.io (free key) | $0 | | |
 
-The free allowances are shared: other Flex Consumption apps in the subscription, and other Log Analytics workspaces of the billing account, use them too.
+Free allowances are shared with other resources. Check [Azure Functions pricing](https://learn.microsoft.com/azure/azure-functions/pricing) for current Flex Consumption rates and grants.
 
 What grows with tenant size: the run time per run (more audit records), the table operations (one row per record for deduplication), and the log volume. In these two tenants, each was about 15% of its free allowance. Log volume is the part to watch in a large tenant: each GB above 5 GB per month is about $2.30. To check your own bill: Azure portal > Cost Management > Cost analysis, scope the resource group `rg-<name>`, group by Meter.
 

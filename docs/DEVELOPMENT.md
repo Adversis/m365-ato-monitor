@@ -4,24 +4,18 @@ How to run the tests and the checks that CI runs.
 
 ## Dev container (recommended)
 
-The dev container has the same tool versions for everyone: Python 3.12, PowerShell 7.6 with Pester 5.9, the Azure CLI 2.91, and Node.js. `.devcontainer/Dockerfile` pins the versions and checks the PowerShell download against a SHA-256 checksum. It works on Intel and Apple silicon. You need Docker.
+The dev container pins Python, PowerShell, Pester, Azure CLI, and Node.js. It requires Docker.
 
-- VS Code: Open the folder. Then select **Reopen in Container**. The container runs `make check` when it is created.
-- Without VS Code:
-
-  ```bash
-  make docker-check   # build the image, then run all linters and tests in it
-  make docker-shell   # a shell in the container; this folder is /workspace
-  ```
-
-  Without `make` (for example in PowerShell on Windows):
+- In VS Code, open the repository. Select **Reopen in Container**.
+- From a terminal, run `make docker-check` to build the image and run the checks. Use `make docker-shell` for a shell.
+- Without `make` on your host, run these Docker commands:
 
   ```powershell
   docker build -f .devcontainer/Dockerfile -t m365-ato-monitor-dev .
-  docker run --rm -it -v "${PWD}:/workspace" m365-ato-monitor-dev make check
+  docker run --rm -v "${PWD}:/workspace" m365-ato-monitor-dev make check
   ```
 
-The container is for development and tests. Install the monitor from your computer or from Azure Cloud Shell. In a container, `az login` must use the device code flow (`az login --use-device-code`). Conditional Access can block this flow. Also, this monitor reports device code sign-ins.
+Install the monitor from your computer or Azure Cloud Shell.
 
 ## Commands
 
@@ -43,7 +37,8 @@ CI (`.github/workflows/ci.yml`) runs on each pull request, on each push to `main
 | Job | Checks |
 |---|---|
 | Python tests and lint | `pytest`, `py_compile`, pyflakes, `node --check` (Python 3.12, as in Azure) |
-| Dependency audit | `pip-audit` on `function/requirements.txt` (the newest versions that a deploy installs) |
+| Dependency audit | `pip-audit` on `function/requirements.txt` |
+| Static analysis (bandit) | Python security checks |
 | PowerShell (install.ps1) | PowerShell parser for the `.ps1` files; Pester tests of `install.ps1` with a fake `az` |
 | Workflow security (zizmor) | Injection, unpinned actions, and token permissions in `.github` |
 

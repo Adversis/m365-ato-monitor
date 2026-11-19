@@ -1,16 +1,10 @@
 # API Compatibility
 
-The external APIs that the tool uses, the permissions, and the constraints. Reviewed: November 2026.
-
-All Microsoft APIs below are generally available. The app authenticates with OAuth 2.0 client credentials (v2.0 token endpoint). The client credential is a client assertion. The assertion is a token of the Function App's user-assigned managed identity for the audience `api://AzureADTokenExchange`. The app registration trusts this token as a federated identity credential. Table Storage uses a managed identity token directly. There is no client secret. The app does not use basic auth.
-
-Cloud: commercial only. The token endpoint (`login.microsoftonline.com`) and the Management API host (`manage.office.com`) are fixed in the code.
-
----
+The monitor uses the commercial Microsoft cloud. See [Security](SECURITY.md#credentials-and-secrets) for token and credential handling.
 
 ## Office 365 Management Activity API
 
-The source of all audit data.
+The source of audit records for continuous monitoring.
 
 | Property | Value |
 |---|---|
@@ -88,8 +82,6 @@ Constraints:
 - After a subscription starts, Microsoft documents up to 12 hours to deliver content. In practice it often takes 12–24 hours.
 - Subscriptions are tenant-level. `./install.ps1 -Uninstall` does not stop them. They cost nothing, and a new installation uses them again.
 
----
-
 ## Microsoft Graph
 
 Used to send email, to read inbox rules, and to search the audit log ([below](#microsoft-graph-audit-log-search)). Optional: UPN-to-object-ID lookup and the response actions.
@@ -103,8 +95,6 @@ Used to send email, to read inbox rules, and to search the audit log ([below](#m
 
 Graph `Mail.Send` (Application) can send as any mailbox. The default (`-MailSendScope mailbox`) uses Exchange RBAC for Applications instead: [How-To](HOW_TO.md#limit-mailsend-to-the-alert-mailbox).
 
----
-
 ## Microsoft Graph audit log search
 
 Used by the onboarding scan (history before the last 7 days) and the user page (audit log of one user). Module: `audit_search.py`.
@@ -112,7 +102,7 @@ Used by the onboarding scan (history before the last 7 days) and the user page (
 | Item | Value |
 |---|---|
 | Endpoints | `POST /v1.0/security/auditLog/queries`; `GET /v1.0/security/auditLog/queries/{id}`; `GET /v1.0/security/auditLog/queries/{id}/records?$top=500`, then `@odata.nextLink` |
-| Status | Generally available in v1.0 since October 2026 (Message Center MC1505599). Microsoft moved it back to beta once in April 2025 |
+| Reference | Microsoft Graph v1.0. [Create a query](https://learn.microsoft.com/graph/api/security-auditcoreroot-post-auditlogqueries?view=graph-rest-1.0) and [list records](https://learn.microsoft.com/graph/api/security-auditlogquery-list-records?view=graph-rest-1.0) |
 | Permission | `AuditLogsQuery.Read.All` (Application). The pair `AuditLogsQuery-Exchange.Read.All` and `AuditLogsQuery-Entra.Read.All` returns Exchange and Entra ID records only |
 | Filters used | `filterStartDateTime`, `filterEndDateTime`, `operationFilters` (onboarding), `userPrincipalNameFilters` (user page) |
 | Status values | `notStarted`, `running`, `succeeded`, `failed`, `cancelled` |
@@ -134,8 +124,6 @@ Not checked against a live tenant yet: the record shape, the speed, and whether 
 | Identity to the code | `X-MS-CLIENT-PRINCIPAL` header (claims, including `roles`). The code trusts it only if `WEBSITE_AUTH_ENABLED` is `true` |
 | Flex Consumption | App Service Authentication is set through `config/authsettingsV2`. Microsoft does not document whether Flex Consumption sets `WEBSITE_AUTH_ENABLED`. If it is missing, the management UI stays off (fail closed) |
 
----
-
 ## Application Insights query API
 
 Used by the monthly roll-up. It counts the monitor's own traces for 30 days.
@@ -149,17 +137,15 @@ Used by the monthly roll-up. It counts the monitor's own traces for 30 days.
 
 The URL comes from configuration, not from an API response. If `APP_INSIGHTS_APP_ID` is not set, the roll-up logs an error and stops. The monitor is not affected.
 
----
-
 ## proxycheck.io v3
 
 IP reputation for sign-in IPs and finding IPs. Checked November 2026.
 
 | Property | Value |
 |---|---|
-| Endpoint | `POST https://proxycheck.io/v3/?p=1&key=<key>` with form field `ips=<a,b,c>` (up to 1,000 per request) |
+| Endpoint | `POST https://proxycheck.io/v3/?p=1&key=<key>` with form field `ips=<a,b,c>`. The service limit is 100 IPs per request without a key and 1,000 with a key. |
 | Key | Query string only. A POST to `/v3/` with no query string gets a 302 redirect to a lookup of the caller's own IP. |
-| Quota | 100 queries/day without a key, 1,000/day with a free key. Paid plans add queries only. They add no fields: "we do not gatekeep features behind our paid plans" (pricing page). |
+| Quota | 100 queries per day without a key and 1,000 with a free key. See [proxycheck.io service limits](https://proxycheck.io/api/). |
 | Flags | None needed. v3 returns the full result. |
 
 `ip_checker.from_v3` turns each result into the v2 keys that the rest of the code reads. An answer in the v2 shape (an older cache entry) passes unchanged.
@@ -187,21 +173,11 @@ Response `status`:
 
 A per-IP object with no `detections` and no `proxy` field is a failed lookup. The API returns each IP key as the client sent it, so the app sends canonical IPs.
 
----
-
 ## Platform lifecycle
 
-Checked November 2026.
+The installer deploys Python 3.12 to Azure Functions Flex Consumption with 512 MB of memory. It checks region support and requires Azure CLI 2.60 or later. See the [Flex Consumption plan reference](https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan) for supported runtimes and regions.
 
-| Platform | Status | Effect on this tool |
-|---|---|---|
-| Azure Functions Flex Consumption (`FC1`) | Current. Linux only. Supports Python 3.10–3.14. Billing: $0.000026 per GB-s in most regions ($0.000037 in some) and $0.40 per million executions. Free grant per subscription and month: 100,000 GB-s and 250,000 executions, shared by all Flex Consumption apps in the subscription. Minimum billed execution: 1 second. Not in every region (`az functionapp list-flexconsumption-locations`) | The tool runs on Flex Consumption with 512 MB instance memory (about $1–3 per month). `install.ps1` checks the region |
-| Flex Consumption limits | The host must start within 30 seconds. A deployment to a stopped app reports success, but the app starts with no functions (Azure/Azure-Functions issue 2670). Microsoft does not document whether the platform sets `WEBSITE_AUTH_ENABLED` | `install.ps1` starts the app before it deploys. The management UI fails closed without `WEBSITE_AUTH_ENABLED` |
-| Python on Azure Functions | 3.11 support ends October 2027. 3.12 ends October 2028. Flex Consumption supports 3.10–3.14. | The tool runs on 3.12. Flex Consumption also offers 3.13 and later, so a later Python version needs no change of plan |
-| Azure CLI | `az functionapp create --flexconsumption-location` and the Flex deployment storage flags. `install.ps1` needs 2.60 or later | The script stops with "too old" and the fix `az upgrade` |
-| proxycheck.io | v3 is current (stable June 2026). v2 is "Legacy", supported "until 2035". Limits: 100 queries per day without a key, 1,000 with a free key. | The tool uses v3. |
-| Application Insights query API (`/v1/apps/{appId}/query`) | Current. The `beta` path ended March 2026. `batch` ends March 2028. Entra ID authentication is required. | No change (`/v1`, single queries, Entra token). |
-| Exchange Online application access policies | Replaced by RBAC for Applications. Microsoft will announce a deprecation later. | `install.ps1 -MailSendScope mailbox` uses RBAC for Applications: a management scope with `MemberOfGroup` (direct members only), and `Test-ServicePrincipalAuthorization` to check. Microsoft: changes apply in 30 minutes to 2 hours (cache). |
+The installer starts the Function App before deployment. The management UI returns HTTP 404 if the app cannot detect App Service Authentication.
 
 ## iCloud Private Relay egress list
 
@@ -221,5 +197,4 @@ These APIs work with Microsoft 365 Business Basic and higher. The tool needs no 
 - If Microsoft adds a sign-in RecordType, add it to `LOGIN_RECORD_TYPES` in `function/config.py`.
 - If Microsoft changes the `UpdateInboxRules` format, update `_update_inbox_rules_indicators` in `function/compromise_detector.py`.
 - Microsoft renames Entra ID audit operations from time to time (for example the en dash in `Update application – Certificates and secrets management `). The app-credential detector matches the start and a fixed part of the name.
-- The Graph audit log search is new in v1.0 (October 2026). If Microsoft moves it to beta again, change `_GRAPH` in `function/audit_search.py`. The onboarding report and the user page then say "not searched" or show the HTTP error until the fix.
 - The Microsoft 365 docs name the search filter `serviceFilter` in one place and `serviceFilters` in another. The module does not use it.

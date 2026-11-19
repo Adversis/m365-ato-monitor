@@ -1,235 +1,57 @@
 # M365 ATO Monitor
 
-**Account takeover alerts for Microsoft 365, running in your own Azure subscription.**
-
-M365 ATO Monitor reads your tenant's audit log and emails you when it finds signs of account takeover. Examples: an inbox rule that hides replies, mail forwarding, a sign-in from a suspicious network, a new MFA method, or an app that gets access to mail. It can also respond automatically.
-
-Microsoft's own risk detection and response needs Entra ID P2. Business Premium includes only P1, and Business Basic and Standard include neither. This monitor works with every license. It is free (MIT license). You pay only for the Azure resources: a few dollars a month for a small tenant. See [How does it compare with Entra ID P2?](#how-does-it-compare-with-entra-id-p2)
+M365 ATO Monitor detects signs of account takeover in Microsoft 365. It runs in your Azure subscription and needs no Entra ID P2 or Defender license.
 
 > [!IMPORTANT]
-> **This is not real-time protection.** The monitor sees an event only after Microsoft publishes its audit record. Many records arrive within about 10 minutes, but Microsoft does not guarantee a time, and some take 1–2 hours or more. The monitor checks for new records every 2 minutes. The optional automatic response can act only after the record arrives.
+> The monitor checks for new audit records every 2 minutes. Alerts and automatic responses start only after Microsoft publishes the record. Some records take hours to arrive.
 
-[Install](#install) · [Automatic response](#automatic-response) · [What it detects](#what-it-detects) · [Limits](#what-it-does-not-detect) · [Documentation](#documentation)
+[Install](#install) · [What it detects](#what-it-detects) · [Detection limits](#what-it-does-not-detect) · [Documentation](#documentation)
 
-![The management UI, Overview page](docs/images/management-ui.png)
+![Management UI overview](docs/images/management-ui.png)
 
 ## How it works
 
-An Azure Function in your subscription reads the unified audit log through the Office 365 Management Activity API. It checks each record for suspicious activity and looks up the reputation of sign-in IP addresses at proxycheck.io.
-
-The monitor emails each finding from your alert mailbox. The email says how to investigate and lists the other alerts for the same user in the last 24 hours. The management UI shows the alerts, the health of the monitor, and the settings.
-
-The app signs in with a managed identity, so there is no client secret to store or rotate. Audit records stay in Microsoft 365. The monitor keeps one row per alert for 90 days. It sends only IP addresses to proxycheck.io.
-
-Diagram with the security controls: [Security: Architecture and controls](docs/SECURITY.md#architecture-and-controls).
+An Azure Function reads the unified audit log with a managed identity. It checks IP reputation with proxycheck.io. Each alert email gives investigation steps and lists other alerts for the user from the last 24 hours. The findings journal keeps alerts for 90 days.
 
 ### Example alert
 
-A user signed in from a VPN address in Amazon's network. The details are not real.
-
-```text
-Subject: [M365 Alert] MEDIUM: Suspicious sign-in - alex@contoso.com from 203.0.113.45, success
-```
-
-<img src="docs/images/example-signin-alert.png" alt="Example alert email: sign-in from a VPN address, Amazon Technologies Inc., AS16509, Ashburn, United States. It has a button to open the user in the management UI, the steps to take, and the details of the sign-in." width="600">
-
-The button opens the user's page in the management UI. That page shows the user's other alerts, and has buttons to revoke sessions, block sign-in, and turn off inbox rules.
+<img src="docs/images/example-signin-alert.png" alt="Example suspicious sign-in alert with IP details, investigation steps, and a link to the affected user." width="600">
 
 ## Requirements
 
-| Requirement | Details |
-| --- | --- |
-| Microsoft 365 tenant | Business Basic or higher, or Office 365 E1, E3, or E5 |
-| Audit logging | Unified audit logging on. It is off by default in Business plans: [turn it on](#turn-on-audit-logging) |
-| Azure subscription | In the same tenant, with the Owner role |
-| Admin role | Global Administrator, one time. Or Privileged Role Administrator (to grant the app's permissions) and Exchange Administrator (to limit Mail.Send to the alert mailbox) |
-| Alert mailbox | A licensed or shared mailbox. The monitor sends every email as this mailbox. With the default `-MailSendScope mailbox`, it can send as no other mailbox |
-| Tools | PowerShell 7.2 or later and Azure CLI 2.60 or later, or Azure Cloud Shell, which has both |
+- A Microsoft 365 commercial tenant with [unified audit logging](docs/GETTING_STARTED.md#unified-audit-logging) on.
+- An Azure subscription in the same tenant and a region with Flex Consumption.
+- A licensed or shared alert mailbox in the tenant.
+- PowerShell 7.2 or later and Azure CLI 2.60 or later. You can use [Azure Cloud Shell](https://shell.azure.com) in PowerShell mode.
+- An account with the [required Azure and Entra roles](docs/GETTING_STARTED.md#roles-for-the-person-who-installs).
 
-**Commercial cloud only.** GCC, GCC High, DoD, and China are not supported.
+## Install
 
-Many Business tenants have no Azure subscription yet. Adding one takes about 10 minutes. Use a pay-as-you-go sign-up. Or, if your organization has a Microsoft Customer Agreement, add a subscription to that billing account. See [Get an Azure subscription](docs/GETTING_STARTED.md#get-an-azure-subscription). [Getting Started](docs/GETTING_STARTED.md#1-prerequisites) shows how to check each requirement.
-
-### Turn on audit logging
-
-Audit logging is off by default in tenants with Business Basic, Business Standard, or Business Premium licenses, and in trial tenants of enterprise licenses ([Microsoft Learn](https://learn.microsoft.com/purview/audit-log-enable-disable)). Other tenants have it on. An admin or a partner can change it at any time, so check it in every tenant, old or new.
-
-In the Microsoft Purview portal:
-
-1. Open the [Microsoft Purview portal](https://purview.microsoft.com) and go to **Solutions > Audit**.
-2. If the page shows **Start recording user and admin activity**, select it. If it does not, audit logging is on.
-
-Or in PowerShell, as a Global Administrator or Exchange Administrator:
-
-```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
-Connect-ExchangeOnline
-Get-AdminAuditLogConfig | Format-List UnifiedAuditLogIngestionEnabled
-Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true
-```
-
-Recording starts within 60 minutes.
-
-In a new tenant, both ways can fail with a message to run `Enable-OrganizationCustomization` first. To save space, Microsoft stores some objects of a new tenant in a shared ("dehydrated") form until this command runs once. Run it, then run `Set-AdminAuditLogConfig` again:
-
-```powershell
-Enable-OrganizationCustomization
-Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true
-```
-
-Microsoft does not say how long `Enable-OrganizationCustomization` takes. Admins report from some minutes to several hours, and sometimes longer. Until it is done, `Set-AdminAuditLogConfig` fails with the same message: wait, then run it again.
-
-## Set up your environment
-
-### Windows
-
-```powershell
-winget install --id Microsoft.PowerShell --source winget
-winget install --id Microsoft.AzureCLI --source winget
-winget install --id Git.Git --source winget
-```
-
-Then open **PowerShell 7** (`pwsh`) from the Start menu.
-
-### macOS
-
-```bash
-brew install powershell azure-cli
-pwsh
-```
-
-### Linux
-
-Install [PowerShell](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux) and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli-linux), then run `pwsh`.
-
-### Azure Cloud Shell
-
-Open [Azure Cloud Shell](https://shell.azure.com) and select **PowerShell**. It has both tools, and you are already signed in.
-
-### Get the code
+From PowerShell 7, run the following commands. Replace the example mailbox and region with your own values.
 
 ```powershell
 git clone https://github.com/Adversis/m365-ato-monitor.git
 cd m365-ato-monitor
-if ($IsWindows) { Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File }
-```
-
-## Install
-
-In PowerShell 7, in the project folder:
-
-```powershell
 ./install.ps1 -AdminEmail security@contoso.com -Location eastus
 ```
 
-The script:
-
-1. Signs in to Azure, shows a plan, and asks before it changes anything.
-2. Creates the Azure resources and two app registrations, grants the permissions, and deploys the code.
-3. Signs in to Exchange Online to limit Mail.Send to the alert mailbox. It shows a URL and a code: open the URL in any browser, also on another computer. It makes a hidden group, `m365-ato-monitor-senders`, with the alert mailbox as the member.
-4. Waits up to 10 minutes for the first monitor run and tests each alert type. Then it asks if it should send one test email for each type. The install is complete before this step: press Ctrl+C to stop the wait.
-
-To change the alert mailbox later, add the new mailbox to the group, then change it in the management UI ([How-To](docs/HOW_TO.md#change-the-alert-mailbox)).
-
-To see each change without making any, add `-DryRun`. `./install.ps1 -Help` lists the commands and options.
-
-If a step fails, the script says how to fix it. After the fix, run the same command again: it continues from what exists.
-
-| Command | What it does |
-| --- | --- |
-| `./install.ps1 -Update` | Deploy new code and repair the setup. Keeps your settings |
-| `./install.ps1 -Verify` | Show the status of the monitor and test each check on a synthetic record |
-| `./install.ps1 -Verify -SendTestAlerts` | Also send one test email for each alert type |
-| `./install.ps1 -Uninstall` | Delete the Azure resources and the app registrations |
-
-You do not need `az login` first: the script signs in for you. If the Azure CLI is signed in to the wrong tenant, the script stops before any change. It shows the command for the tenant of `-AdminEmail`.
+Check the tenant, mailbox, and permissions in the plan before you continue. Use `-DryRun` to preview the changes. Follow [Getting Started](docs/GETTING_STARTED.md) for each step and for troubleshooting.
 
 ### Install in another tenant
 
-For a second tenant (and each one after it), add `-Tenant` with a domain of that tenant:
-
-```powershell
-./install.ps1 -Tenant fabrikam.com -AdminEmail security@fabrikam.com -Location eastus
-```
-
-1. The script signs in to that tenant in the browser. Use an account of that tenant: Owner of an Azure subscription there, and Global Administrator.
-2. It selects the Azure subscription of that tenant. If there is more than one, it asks which one.
-3. It installs as for the first tenant. For the Exchange Online sign-in, use an account of the same tenant (a private browser window helps if the browser picks another account). The script stops if the sign-in lands in another tenant.
-4. The alert subjects start with the organization name, for example `[M365 Alert][Fabrikam]`. Change it in Settings > Email.
-5. At the end, the Azure CLI goes back to the subscription that you used before. Your other installations do not change.
-
-Each install and update is saved on this computer (`~/.m365-ato-monitor/tenants.json`: tenant, subscription, name, region; no secrets):
-
-| Command | What it does |
-| --- | --- |
-| `./install.ps1 -List` | Show your installations |
-| `./install.ps1 -Tenant fabrikam.com -Update` | Deploy new code to one installation. `-Verify` and `-Uninstall` take `-Tenant` too |
-| `./install.ps1 -UpdateAll` | Deploy new code to each installation, one after the other, with a summary at the end |
-
-An installation made before `-Tenant` existed shows in `-List` after its next `./install.ps1 -Update`.
-
-Step-by-step guide and troubleshooting: [Getting Started](docs/GETTING_STARTED.md).
-
-**Using an AI coding assistant?** Open the project folder in Claude Code, Codex, Cursor, or Copilot and ask it to read [AGENTS.md](AGENTS.md). That file tells the assistant to preview the changes with `-DryRun` and to ask before it changes your tenant.
+Run one installation per tenant. Use `-Tenant <domain>` to select it. Use `-List` to see saved installations and `-UpdateAll` to update them. See [Install in another tenant](docs/GETTING_STARTED.md#install-in-another-tenant).
 
 ## After installation
 
-Microsoft starts to deliver audit records 12–24 hours after the first run. A setup email arrives then, and the "Starting state" report follows. The report lists the inbox rules of every mailbox and the findings in up to 180 days of audit history. Use it to find what an attacker did before the install.
-
-Add a mail rule so that mail with `[M365 Alert]` in the subject does not go to junk mail. Optional: get a free [proxycheck.io](https://proxycheck.io/dashboard/) key (1,000 lookups per day; 100 without a key) and enter it in the management UI. The Overview page shows how much of the daily limit is used, and the monitor emails you when it is low or used up. See [What happens when the proxycheck.io quota runs out?](#what-happens-when-the-proxycheckio-quota-runs-out)
-
-A health report arrives each Monday. If it does not arrive, the monitor did not run: run `./install.ps1 -Verify`.
-
-To also get alerts in Slack or Microsoft Teams, or to get them there instead of by email, set a webhook in **Settings > Webhook**. Reports stay in email.
+Run `./install.ps1 -Verify` to check the setup and run the detector self-test. Add `-SendTestAlerts` to send a test email for each alert type. See [what to expect after installation](docs/GETTING_STARTED.md#4-after-installation).
 
 ## Automatic response
 
-The monitor can revoke a user's sessions, block sign-in, or turn off an inbox rule after a high alert. It is off by default. To turn it on:
-
-1. Grant the permissions. The install asks for them; the default answer is yes. To grant them later, run `./install.ps1 -ResponsePermissions yes`.
-2. In the management UI, go to **Settings > Automatic response** and set:
-
-| Setting | What to choose |
-| --- | --- |
-| Action on a high account-takeover alert | **Revoke sessions**, or **Block sign-in and revoke sessions** |
-| Action on a sign-in from a new country | The same choices. Applies after the 14-day learning period |
-| Turn off malicious inbox rules | On: a high inbox rule alert turns the rule off. The rule is kept for investigation |
-| Never change these accounts | Break-glass and admin accounts. The alert mailbox is always exempt |
-| Maximum account actions per day | A limit, so that a wrong result cannot lock out many users |
-
-<img src="docs/images/auto-response.png" alt="A high inbox rule alert in the management UI: a rule named '.' forwards mail about invoices to an outside address. The response line says: Block sign-in: done; Revoke sessions: done; Disable inbox rule: done." width="700">
-
-A revoke does not stop every app at once. Outlook desktop and other apps with continuous access evaluation stop within about 15 minutes. Web apps and other clients stop when their access token expires (60 to 90 minutes). See [How fast a revoke or block applies](docs/HOW_TO.md#how-fast-a-revoke-or-block-applies).
-
-What the response does not do:
-
-- Change passwords.
-- Act on admin accounts: Microsoft Graph refuses it.
-- Act on alerts about admin changes or app consents.
-- Act when one account changed another account. Either account can be the compromised one.
-- Act after a wrong-password sign-in.
-
-The same actions are buttons on each user's page in the management UI. Details: [How-To: Respond automatically](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).
+Automatic response is off by default. With the required permissions, the monitor can revoke sessions, block sign-in, or turn off a malicious inbox rule. Configure these actions in **Settings > Automatic response**. See [Respond automatically to account-takeover alerts](docs/HOW_TO.md#respond-automatically-to-account-takeover-alerts).
 
 ## Management UI
 
-The install prints the address:
-
-```text
-https://<function app>.azurewebsites.net/api/manage
-```
-
-Sign-in uses Entra ID. The person who runs the install can open the page. To give other people access, list their user names, or select directory roles such as Global Administrator, in **Settings > Management UI access**. The settings page shows who has each role now. To see which account you are signed in with, and why it has access, select your name at the top right.
-
-| Page | What it shows |
-| --- | --- |
-| **Overview** | The health of the monitor, the alerts of the last 7 days, failed sign-ins of the last 7 days (password spraying, no alerts), and tools: test alerts and the onboarding scan |
-| **Alerts** | Each alert of the last 90 days, and what happened to it |
-| **Users** | One user's alerts, inbox rules, countries, and audit log. Buttons to revoke sessions, block sign-in, or turn off an inbox rule |
-| **Mutes** | Stop email for an expected medium alert for some days. A mute hides a high alert only if it names one alert type, one user, and one network |
-| **Settings** | Alert mailbox and recipients, a webhook for Slack or Teams, allowlists, detection options, the automatic response, the proxycheck.io key, and who can open the management UI |
-| **Countries** | The approved countries of each user. Approve a country before a user travels |
-| **History** | Each change and action made in the management UI, and who made it |
+Open the `/api/manage` link that the installer prints. Sign in with the account that installed the monitor. Use **Overview** to check health, **Alerts** to triage findings, and **Users** to investigate an account. See [How-To](docs/HOW_TO.md#where-to-change-what) for settings, access, and response actions.
 
 ## What it detects
 
@@ -251,109 +73,25 @@ Sign-in uses Entra ID. The person who runs the install can open the page. To giv
 | Stolen session | One sign-in session used from two countries, or used in the same country from a VPN, proxy, hosting, or Tor IP that did not sign in | High or medium |
 | Mail access from a risky IP | Mail read or sent from a VPN, proxy, hosting, or new-country IP that did not sign in as the user in the last 7 days | High or medium |
 
-Most findings become high if the source IP is a VPN, proxy, or hosting address, or is in a country that is new for the user. A failed sign-in (wrong password) sends email only if you turn on **Email failed sign-ins**. A correct password stopped by MFA always sends email. You can turn off each alert type.
+IP reputation or a new country can raise the severity of a finding. Wrong-password attempts in suspicious sign-in, attack-tool, and automation-client detections send email only when **Email failed sign-ins** is on. A sign-in stopped by MFA or Conditional Access can still alert when this setting is off.
 
 How each check works: [Architecture](docs/ARCHITECTURE.md#compromise-check). How to investigate each alert: [Alert Triage](docs/TRIAGE.md).
 
 ## What it does not detect
 
-- AiTM phishing through a residential proxy in the user's own country. The monitor detects the attacker's next steps instead: inbox rules, forwarding, MFA changes, and app consents.
-- A stolen session used from a normal home or office network in the user's own country.
-- Activity that Microsoft 365's own servers do for the user, for example Teams, Copilot, or Outlook mobile. The record shows a Microsoft IP, not the user's, so the session and mail access checks skip it.
-- Mail read with a stolen token, if the tenant does not log `MailItemsAccessed`. Business plans may not log it. The Overview page shows if your tenant does.
-- Passkey and FIDO2 registration, and SharePoint, OneDrive, and Teams activity.
-- A new device, browser, or mail client.
-- Risk scores and Conditional Access results from Entra ID P1/P2 or Defender.
-
-Full list: [Architecture: detection limits](docs/ARCHITECTURE.md#detection-limits).
+The monitor can miss a sign-in or stolen session from a residential IP in the user's country. Mail access checks need audit records for the action and a client IP. See [Detection limits](docs/ARCHITECTURE.md#detection-limits) for the full list.
 
 ## Cost
 
-About $1.50 per month for a small tenant: measured $1.30 and $1.50 per month in two small tenants (November 2026). Almost all of it is fixed: storage operations of the Functions host and one log alert rule. The Function App and the logs stay inside Azure's free monthly allowances. Breakdown and what grows with tenant size: [Architecture: costs](docs/ARCHITECTURE.md#costs). To get a warning, set a Cost Management budget on the resource group.
-
-## FAQ
-
-### How does it compare with Entra ID P2?
-
-| | This monitor | Entra ID P2 |
-| --- | --- | --- |
-| Cost | Free (MIT license). Azure resources: about $1.50 per month for a small tenant | $10 per user per month, paid yearly ([Microsoft list price](https://www.microsoft.com/security/business/microsoft-entra-pricing)). Included in Microsoft 365 E5 |
-| When | After Microsoft publishes the audit record: minutes to hours | At each sign-in |
-| Response | Email. Optional: revoke sessions, block sign-in, turn off the rule, after the alert | Risk-based Conditional Access: ask for MFA or a password change, or block the sign-in |
-
-Without P2 (Free, P1, Business Premium), Entra ID shows a risky sign-in only as "Additional risk detected", with no details and no risk-based policies.
-
-| P2 detection | This monitor |
-| --- | --- |
-| Anonymous IP address | Yes: VPN, Tor, proxy, and hosting addresses (proxycheck.io) |
-| Atypical travel, impossible travel, new country | New country, after 14 days of learning. One session used from two countries |
-| Anomalous token, attacker in the middle | One session used from two countries, or moved to a risky IP. Not from a normal network in the user's own country |
-| Inbox forwarding and inbox manipulation rules | Yes, and mail flow rules |
-| Suspicious credential addition | Yes: MFA method added or replaced, default method changed |
-| Admin changes, token issuer anomaly | Fixed rules, not a baseline: admin roles, app consents, app credentials, federation |
-| Malicious IP, threat intelligence | Partly: the proxycheck.io risk score. No Microsoft threat intelligence |
-| Unfamiliar sign-in properties | No |
-| Password spray, leaked credentials | No |
-| Unusual sending, mass file access, API traffic, token theft from a device | No |
-
-Some P2 detections also need Defender for Cloud Apps or Microsoft 365 E5. The monitor also alerts on changes that P2 does not score: mailbox delegation, audit logging turned off, and mail protection turned off. If you have P2, use both: P2 to stop risky sign-ins, and this monitor for mailbox and tenant changes. Source: Microsoft Learn, [What are risk detections?](https://learn.microsoft.com/entra/id-protection/concept-identity-protection-risks)
-
-### Does it block attacks?
-
-No. It reports suspicious activity after Microsoft publishes the audit record: often within minutes, sometimes 1–2 hours or more. The [automatic response](#automatic-response) acts after an alert.
-
-To stop attacks at sign-in, use Microsoft's controls. Security Defaults (free) require MFA, and block legacy authentication and device code sign-in. They do not check sign-in risk ([Microsoft Learn](https://learn.microsoft.com/entra/fundamentals/security-defaults)). Conditional Access (Entra ID P1) can block sign-ins by location, device, or app. Blocking by sign-in risk needs Entra ID P2.
-
-### What permissions does it need?
-
-Read access to the audit log, users, inbox rules, directory role assignments, and service principals, and `Mail.Send` to send the alerts. You can limit `Mail.Send` to the alert mailbox. The automatic response needs more permissions. The install asks before it grants them.
-
-Full list: [Security](docs/SECURITY.md#permissions).
-
-### What happens when the proxycheck.io quota runs out?
-
-proxycheck.io allows 100 IP lookups per day without a key, 1,000 with a free key, and more with a paid plan. Each new IP is one lookup. The monitor keeps the answer for a clean IP (office, home, mobile) for 7 days, and for a flagged IP (VPN, proxy, hosting, Tor) for 24 hours. To change the 7 days: **Settings > Advanced > Keep clean IP lookups**. When the limit is used up:
-
-| Check | What happens |
-| --- | --- |
-| Suspicious sign-ins and new countries | The sign-in waits in a queue. Each run checks it again, for up to 26 hours. The alert comes late |
-| Stolen session and mail access | Records whose IP lookup fails are skipped after about 8 minutes. These alerts are lost, unless the session is used again after the quota is back |
-| Account takeover alerts (inbox rules, forwarding, MFA, app consent, and others) | Still sent, but without the IP reputation. An alert from a risky IP is not raised to high |
-
-The monitor emails you when the quota is low and again when it is used up, at most once a day for each. The Overview page shows the state. With a key, it also shows the count of lookups used today, if **Dashboard API Access** is on in the proxycheck.io dashboard.
-
-### Does a paid proxycheck.io plan help?
-
-Only if you run out of lookups. A paid plan adds lookups per day (from 10,000 for $4.99 per month). It adds no data: the free plan has the same fields and accuracy. With the free key, the monitor shows the VPN service name, the hostname, and the attacks that proxycheck.io saw from the IP. If the Overview page often shows the quota as low or used up, a paid plan helps.
-
-### Can an MSP monitor many tenants?
-
-Yes, with one install per tenant, each in an Azure subscription of that tenant. Install each customer with `./install.ps1 -Tenant <customer domain> ...` ([Install in another tenant](#install-in-another-tenant)), see them with `-List`, and update them all with `-UpdateAll`. The alert subjects carry each customer's name. Add your ticket system or your own mailbox as an extra recipient in each installation (Settings > Email). Each customer pays for and owns their own installation and data.
-
-### How does it compare with other options?
-
-Microsoft Purview has some built-in alert policies: use them too. Defender adds more detection. A SIEM is more flexible, but needs ongoing work.
-
-## Development
-
-`make check` runs all linters and tests. `make docker-check` runs them in a dev container with pinned tool versions.
-
-See [Development](docs/DEVELOPMENT.md). To add a detection, see [AGENTS.md](AGENTS.md#add-a-detection).
+The software is free under the MIT license. Azure charges were about $1.30–$1.50 per month in two small tenants. See [Costs](docs/ARCHITECTURE.md#costs) for what affects your bill.
 
 ## Documentation
 
-| Document | Content |
-| --- | --- |
-| [Getting Started](docs/GETTING_STARTED.md) | Prerequisites, install, dry run, troubleshooting |
-| [How-To Guide](docs/HOW_TO.md) | Settings, allowlists, mutes, response actions, reports, update, uninstall |
-| [Alert Triage](docs/TRIAGE.md) | For each alert: how to check it, contain the account, and when to escalate |
-| [Architecture](docs/ARCHITECTURE.md) | Design, detections, latency, detection limits, Azure resources, costs |
-| [Security](docs/SECURITY.md) | Permissions, credentials, known limitations |
-| [API Compatibility](docs/API_COMPATIBILITY.md) | Microsoft and proxycheck.io APIs, audit record fields |
-| [Changelog](CHANGELOG.md) | The changes in each release |
-| [App Insights Queries](docs/APP_INSIGHTS_QUERIES.md) | KQL queries |
-| [Development](docs/DEVELOPMENT.md) | Dev container, tests, CI |
-| [AGENTS.md](AGENTS.md) | Instructions for AI assistants |
+- [Getting Started](docs/GETTING_STARTED.md) for installation and troubleshooting.
+- [How-To Guide](docs/HOW_TO.md) for settings, updates, and common tasks.
+- [Alert Triage](docs/TRIAGE.md) for investigation and response steps.
+- [Documentation index](docs/INDEX.md) for technical references and development.
+- [Changelog](CHANGELOG.md) for release changes.
 
 ## License
 
