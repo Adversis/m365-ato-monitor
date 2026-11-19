@@ -21,3 +21,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # The container's Python matches the Function App runtime (3.12, install.ps1).
+    # Digest updates of 3.12 still come. A new Python version is one change:
+    # install.ps1, the Dockerfile, CI, and the docs together.
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
