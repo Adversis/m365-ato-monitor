@@ -4,6 +4,7 @@ The changes in each release. Versions follow `function/version.py`. The release 
 
 ## Unreleased
 
+- Skip Copilot backend REST mail-read records in session and mail-access checks even when Graph cannot identify the app's owner. The record must identify the Copilot API as the relay. Sign-ins and direct client access still count.
 - Session alerts separate observed activity from possible causes. Email and webhook alerts include observation times, elapsed time, client and app details, and both the network provider and organisation when available. Webhooks also summarize related alerts. Detection rules and severity are unchanged.
 
 ## 1.1.0 (2026-11-19)

@@ -68,6 +68,12 @@ _GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 # APIs that a client with a user's token can call directly. A record whose token was for another API
 # (APIId) was written by the service of that API, which called Exchange for the user.
 _DIRECT_APIS = frozenset({_GRAPH_API_ID, "00000002-0000-0ff1-ce00-000000000000"})   # Graph, Exchange
+# Copilot backend. Microsoft documents this app ID in its interaction export example:
+# https://learn.microsoft.com/en-us/graph/api/aiInteractionHistory-getAllEnterpriseInteractions
+# A first-party app need not have a service principal in the customer's tenant, so
+# Graph ownership lookup alone can miss it. Use this only for the REST mail-read
+# relay shape below, never for sign-ins or as a general client-app allowlist.
+_COPILOT_RELAY_API = "fb8d773d-7ef8-4ec0-a117-179f88add510"
 MAX_SUBJECTS = 3
 
 
@@ -286,6 +292,7 @@ def service_ip_client(record: dict) -> bool:
     record (the REST client marker and the Graph resource ID), and an Exchange
     record that a Microsoft service wrote for the user (relaying_app). Sign-in
     records always show the sign-in source and must not be excluded here.
+    The documented Copilot REST mail-read relay needs no Graph ownership lookup.
     """
     operation = record.get("Operation")
     if operation in ("UserLoggedIn", "UserLoginFailed"):
@@ -301,6 +308,8 @@ def service_ip_client(record: dict) -> bool:
     if client == "client=rest" and _GRAPH_API_ID in resources:
         return True
     app = relaying_app(record)
+    if operation == READ and client == "client=rest" and app == _COPILOT_RELAY_API:
+        return True
     return bool(app) and service_actors.is_microsoft_app(app)
 
 

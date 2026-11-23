@@ -144,7 +144,7 @@ class TestCheck:
         # Public app IDs only; all user, session, IP, and event data is synthetic.
         from ip_checker import analyze_ip
         import mail_access as ma
-        api = "fb8d773d-7ef8-4ec0-a117-179f88add510"
+        api = "bbbbbbbb-1111-4222-8333-000000000000"
         client = "27922004-5251-4030-b22d-91ecd9a37ea4"
         record = mail_access(VPN_IP, 20)
         record.update(Workload="Exchange", ClientInfoString="Client=REST;;", AppId=api, ClientAppId=client)
@@ -154,6 +154,60 @@ class TestCheck:
             findings = sm.check(FakeTable(), [signin(HOME_IP, 1), record], Lookup(), NOW, analyze=analyze_ip)
         lookup_owner.assert_called_once_with(api)
         assert len(findings) == expected_findings
+
+    @staticmethod
+    def _copilot_mail_read():
+        # Public Microsoft app IDs; no customer identifiers or message contents.
+        record = mail_access(VPN_IP, 20)
+        api = "fb8d773d-7ef8-4ec0-a117-179f88add510"
+        client = "27922004-5251-4030-b22d-91ecd9a37ea4"
+        record.update(Workload="Exchange", ClientInfoString="Client=REST;;", AppId=api, ClientAppId=client)
+        record["AppAccessContext"].update(APIId=api, ClientAppId=client)
+        return record
+
+    @pytest.mark.parametrize("country", ["US", "NL"])
+    @pytest.mark.parametrize("nested_client", [False, True])
+    def test_copilot_mail_read_skips_backend_ip_without_graph(self, country, nested_client):
+        from ip_checker import analyze_ip
+        import mail_access as ma
+        record = self._copilot_mail_read()
+        if nested_client:
+            record.pop("ClientAppId")
+        lookup = Lookup(dict(DATA, **{VPN_IP: dict(DATA[VPN_IP], isocode=country)}))
+        with patch("service_actors.app_owner_tenant", side_effect=AssertionError("no Graph lookup")):
+            assert ma.service_ip_client(record)
+            assert sm.check(FakeTable(), [signin(HOME_IP, 1), record], lookup, NOW, analyze=analyze_ip) == []
+            assert ma.observations([record]) == {}
+        assert lookup.calls == [[HOME_IP]]  # no reputation lookup spent on the backend
+        assert ma.count([record])["reads"] == 1  # mail-access reporting still counts it
+
+    @pytest.mark.parametrize("changes,context", [
+        ({"AppId": "00000002-0000-0ff1-ce00-000000000000"},
+         {"APIId": "00000002-0000-0ff1-ce00-000000000000"}),  # direct Exchange access
+        ({"AppId": "bbbbbbbb-1111-4222-8333-000000000000"},
+         {"APIId": "bbbbbbbb-1111-4222-8333-000000000000"}),  # an unknown relay
+        ({"AppId": ""}, {}),
+        ({}, {"APIId": ""}),
+        ({"ClientAppId": "fb8d773d-7ef8-4ec0-a117-179f88add510"}, {}),  # no relay
+        ({"ClientAppId": ""}, {"ClientAppId": ""}),
+        ({"ClientInfoString": "Client=OWA"}, {}),
+        ({"Workload": "SharePoint"}, {}),
+        ({"Operation": "UserLoggedIn"}, {}),
+        ({"Operation": "UserLoginFailed"}, {}),
+        ({"Operation": "Send"}, {}),  # this fallback covers observed mail reads only
+    ])
+    def test_copilot_id_alone_does_not_exempt_client_activity(self, changes, context):
+        from ip_checker import analyze_ip
+        import mail_access as ma
+        record = self._copilot_mail_read()
+        record.update(changes)
+        record["AppAccessContext"].update(context)
+        with patch("service_actors.app_owner_tenant", return_value=None):
+            assert not ma.service_ip_client(record)
+            if record["Operation"] not in ("UserLoggedIn", "UserLoginFailed"):
+                findings = sm.check(FakeTable(), [signin(HOME_IP, 1), record], Lookup(), NOW,
+                                    analyze=analyze_ip)
+                assert len(findings) == 1  # the session check continues to cover direct/unknown access
 
     def test_exchange_server_ip_is_not_a_second_country(self):
         # Regression: an Outlook-iOS MailItemsAccessed record from an Exchange Online server IP
