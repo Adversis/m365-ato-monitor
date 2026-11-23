@@ -4,6 +4,8 @@ The changes in each release. Versions follow `function/version.py`. The release 
 
 ## Unreleased
 
+- Session alerts separate observed activity from possible causes. Email and webhook alerts include observation times, elapsed time, client and app details, and both the network provider and organisation when available. Webhooks also summarize related alerts. Detection rules and severity are unchanged.
+
 ## 1.1.0 (2026-11-19)
 
 Detection:

@@ -525,9 +525,9 @@ _COMPROMISE_STEPS = {
         "and app consents. Tell the recipients of the sent mail that it is not genuine.",
     ],
     "session_reuse": [
-        "Ask the user (by phone, not email) where they are, and if they use a VPN. A session that moves "
-        "between countries within minutes or hours, or to a VPN or hosting IP that did not sign in, "
-        "is often a stolen cookie or token. A VPN or travel can also cause it.",
+        "Ask the user by phone or in person whether they changed networks, used a VPN, or travelled. "
+        "Compare the observation times and client and app details with their usual activity. "
+        "A hosting classification alone does not establish token theft.",
         "Check the account for new inbox rules, mailbox forwarding, MFA methods, and app consents. "
         "Revoking sessions ends the stolen session; a password reset alone does not.",
     ],
@@ -560,6 +560,9 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
     title = _FINDING_TITLES.get(ftype, ftype.replace("_", " ").capitalize() or "Compromise indicator")
     short = _FINDING_SHORT.get(ftype, title)
     is_test = "SELF-TEST" in subject_prefix
+    session_context = (finding.get("session_context") or []) if ftype == "session_reuse" else []
+    if ftype == "session_reuse":
+        ip_context = ip_context or str(finding.get("ip_context") or "")
 
     raw_json = json.dumps(event, indent=2, default=str)
     if len(raw_json) > _MAX_EVENT_JSON_CHARS:
@@ -581,6 +584,8 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
              "compromised: revoke its sessions and reset its password."
              if ftype in _CONFIRM_FIRST or finding.get("confirm_first")
              else "Revoke the user's sessions and reset the password.")
+    if ftype == "session_reuse":
+        first = "If the user does not recognize the activity, revoke their sessions and reset the password."
     parts.append(_steps([first]
                         + _COMPROMISE_STEPS.get(ftype, ["Look for other attacker activity on the account."])))
     if not is_test:
@@ -599,6 +604,7 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
         ("Source IP", _e(ip or "not in the record")),
         ("Audit record ID", _e(event.get("Id", ""))),
     ]
+    facts += [(str(label), _e(value)) for label, value in session_context]
     parts.append(_facts(facts))
     parts.append(_heading("Audit record"))
     parts.append(_code(raw_json))
@@ -607,8 +613,10 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
         preheader=f"{raw_user}: {description}",
         level=level, badge=severity, kicker="Compromise indicator", title=title,
         body="".join(parts),
-        footer_note="One email per finding. Severity is high when the source IP is a VPN, proxy, or "
-                    "hosting address, or is in a country that is new for the user.",
+        footer_note=("Network classifications and locations are estimates. The IP score is not a probability "
+                     "of account compromise." if ftype == "session_reuse" else
+                     "One email per finding. Severity is high when the source IP is a VPN, proxy, or "
+                     "hosting address, or is in a country that is new for the user."),
     )
     subject = f"{ALERT_TAG} {subject_prefix}{severity}: {short} - {raw_user}"
     summary = f"{raw_user}: {description}" + (f" {ip_context}." if ip_context else "")
@@ -616,6 +624,12 @@ def send_compromise_alert(finding: dict, ip_context: str = "", subject_prefix: s
     net, asn = str(finding.get("network") or ""), str(finding.get("asn") or "")
     if (net or asn) and (net or asn) not in summary:
         summary += " Network: " + (f"{net} ({asn})" if net and asn else net or asn) + "."
+    if ftype == "session_reuse":
+        summary += " The IP score is not a probability of account compromise."
+        if related:
+            names = ", ".join(dict.fromkeys(short_title(r.get("type", "")) for r in related))[:160]
+            summary += f" Other alerts for this user in the last 24 hours: {len(related)} ({names})."
+        summary += "".join(f"\n{label}: {value}" for label, value in session_context)
     return _deliver(subject, body, outbox, summary=summary, link=ui_link("user", raw_user) if "@" in raw_user else "")
 
 

@@ -135,6 +135,26 @@ class TestCheck:
         row = table.get_entity("session", SID)
         assert '"MS"' not in row["ips"] and '"IE"' in row["ips"]
 
+    @pytest.mark.parametrize("owner,expected_findings", [
+        ("f8cdef31-a31e-4b4a-93e4-5f571e91255a", 0),  # Microsoft Services
+        ("aaaaaaaa-1111-4222-8333-000000000000", 1),  # another tenant
+        (None, 1),                                   # ownership lookup unavailable
+    ])
+    def test_service_relay_requires_verified_microsoft_ownership(self, owner, expected_findings):
+        # Public app IDs only; all user, session, IP, and event data is synthetic.
+        from ip_checker import analyze_ip
+        import mail_access as ma
+        api = "fb8d773d-7ef8-4ec0-a117-179f88add510"
+        client = "27922004-5251-4030-b22d-91ecd9a37ea4"
+        record = mail_access(VPN_IP, 20)
+        record.update(Workload="Exchange", ClientInfoString="Client=REST;;", AppId=api, ClientAppId=client)
+        record["AppAccessContext"].update(APIId=api, ClientAppId=client)
+        assert ma.relaying_app(record) == api
+        with patch("service_actors.app_owner_tenant", return_value=owner) as lookup_owner:
+            findings = sm.check(FakeTable(), [signin(HOME_IP, 1), record], Lookup(), NOW, analyze=analyze_ip)
+        lookup_owner.assert_called_once_with(api)
+        assert len(findings) == expected_findings
+
     def test_exchange_server_ip_is_not_a_second_country(self):
         # Regression: an Outlook-iOS MailItemsAccessed record from an Exchange Online server IP
         # (shape of a real record) made a high "second country" alert.
@@ -175,11 +195,10 @@ class TestCheck:
         data = dict(DATA, **{VPN_IP: dict(DATA[VPN_IP], city="Ashburn", region="Virginia")})
         f = sm.check(FakeTable(), [signin(HOME_IP, 1), mailbox(VPN_IP, 20)], Lookup(data), NOW,
                      analyze=analyze_ip)[0]
-        assert "a VPN IP (M247 Europe, risk 66/100, Ashburn, Virginia)" in f["description"]
-        assert f["ip_context"].endswith("(M247 Europe, risk 66/100, Ashburn, Virginia)")
+        assert "VPN (M247 Europe, AS9009, score 66/100, estimated location: Ashburn, Virginia)" in f["description"]
         f = sm.check(FakeTable(), [signin(HOME_IP, 1), signin(ABROAD_IP, 2)],
                      Lookup(dict(DATA, **{ABROAD_IP: dict(DATA[ABROAD_IP], risk=0, city="Amsterdam")})), NOW)[0]
-        assert "(IP 45.33.1.2, Akamai Connected Cloud, risk 0/100, Amsterdam)" in f["description"]
+        assert "(IP 45.33.1.2, Akamai Connected Cloud, AS63949, score 0/100, estimated location: Amsterdam)" in f["description"]
 
     def test_sign_in_from_exchange_server_range_is_kept(self):
         exo_ip = "2603:10b6:930:d1::7"
@@ -226,9 +245,49 @@ class TestRiskyNetworkSameCountry:
         f = findings[0]
         assert f["type"] == "session_reuse" and f["severity"] == "medium" and f["ip"] == VPN_IP
         assert f["country"] == "US" and f["mark"] == sm.NETWORK_MARK
-        assert f"used from IP {HOME_IP} and then from {VPN_IP}, a VPN IP (M247 Europe, risk 66/100)" in f["description"]
+        assert f"appeared from IP {HOME_IP} and then from {VPN_IP}" in f["description"]
+        assert "classifies the later IP as VPN (M247 Europe, AS9009, score 66/100)" in f["description"]
         assert "same country (US)" in f["description"] and "MoveToDeletedItems" in f["description"]
-        assert f["ip_context"] == f"Session first seen from {HOME_IP}; now from a VPN IP in US (M247 Europe, risk 66/100)"
+        assert "No matching sign-in from this exact IP" in f["ip_context"]
+        assert "7-day history" in f["ip_context"]
+        assert "does not prove that no sign-in occurred" in f["ip_context"]
+
+    def test_context_keeps_actual_times_across_runs_and_pending_delivery(self):
+        table = FakeTable()
+        self._check([signin(HOME_IP, 1), signin(HOME_IP, 10)], table)
+        # An overlapping fetch must not move the previous observation back to 11:01.
+        self._check([signin(HOME_IP, 1)], table)
+        record = mailbox(VPN_IP, 20)
+        record.update(AppId="resource-app", ClientAppId="client-app", UserAgent="Outlook <test>")
+        record["AppAccessContext"]["APIId"] = "api-app"
+        finding = self._check([record], table)[0]
+        facts = dict(finding["session_context"])
+        assert facts["Previous observation"] == f"{HOME_IP} at 2026-11-08 11:10:00 UTC"
+        assert facts["Current observation"] == f"{VPN_IP} at 2026-11-08 11:20:00 UTC"
+        assert facts["Elapsed"] == "10 minutes"
+        assert facts["Client / protocol"] == "Client=OWA;Action=ViaProxy"
+        assert facts["App ID"] == "resource-app" and facts["Client app ID"] == "client-app"
+        assert facts["API ID"] == "api-app" and facts["User agent"] == "Outlook <test>"
+        assert dict(sm.pending_findings(table, NOW)[0]["session_context"]) == facts
+
+    def test_old_session_rows_do_not_invent_a_previous_time(self):
+        table = FakeTable()
+        self._check([signin(HOME_IP, 1)], table)
+        # Simulate a row written before per-IP times existed.
+        table.upsert_entity({"PartitionKey": "session", "RowKey": SID, "ip_times": "{}"})
+        facts = dict(self._check([mailbox(VPN_IP, 20)], table)[0]["session_context"])
+        assert facts["Previous observation"] == f"{HOME_IP} at time unavailable"
+        assert "Elapsed" not in facts
+
+    def test_hosting_context_keeps_provider_and_legacy_organisation(self):
+        from ip_checker import analyze_ip
+        data = dict(DATA, **{VPN_IP: {"isocode": "US", "type": "Hosting", "risk": 33,
+                                    "provider": "Microsoft Corporation", "organisation": "Legacy allocation",
+                                    "asn": "AS8075"}})
+        finding = sm.check(FakeTable(), [signin(HOME_IP, 1), mailbox(VPN_IP, 20)], Lookup(data), NOW,
+                           analyze=analyze_ip)[0]
+        assert finding["severity"] == "medium"
+        assert "Hosting (Microsoft Corporation, Legacy allocation, AS8075, score 33/100)" in finding["description"]
 
     def test_tor_is_high(self):
         assert self._check([signin(HOME_IP, 1), mailbox(TOR_IP, 20)])[0]["severity"] == "high"
@@ -291,7 +350,8 @@ class TestPipeline:
         send, sessions = self._run([signin(HOME_IP, 1), signin(ABROAD_IP, 9)])
         assert send.call_count == 1
         finding, context = send.call_args[0][0], send.call_args[0][1]
-        assert finding["type"] == "session_reuse" and "now in NL" in context
+        assert finding["type"] == "session_reuse" and finding["country"] == "NL"
+        assert context == ""
         assert "NL" in sessions.get_entity("session", SID)["alerted"]
 
     def test_disabled(self):
@@ -300,7 +360,7 @@ class TestPipeline:
 
     def test_risky_network_alert_marked(self):
         send, sessions = self._run([signin(HOME_IP, 1), mailbox(VPN_IP, 9)])
-        assert send.call_count == 1 and "now from a VPN IP in US" in send.call_args[0][1]
+        assert send.call_count == 1 and "No matching sign-in from this exact IP" in send.call_args[0][1]
         assert sm.NETWORK_MARK in sessions.get_entity("session", SID)["alerted"]
 
     def test_mail_records_left_to_the_mail_access_check(self):

@@ -83,6 +83,39 @@ class TestFormats:
 
 class TestDelivery:
 
+    @pytest.mark.parametrize("fmt", ["slack", "teams", "json"])
+    def test_session_context_reaches_email_and_each_webhook_format(self, hook, fmt):
+        from ip_checker import analyze_ip
+        import session_monitor
+        from tests.fakes import FakeTable
+        from tests.test_session_monitor import HOME_IP, VPN_IP, NOW, Lookup, signin, mailbox
+        record = mailbox(VPN_IP, 20)
+        record.update(UserAgent="Outlook <test>", AppId="resource-app")
+        record["AppAccessContext"].update(ClientAppId="client-app", APIId="api-app")
+        finding = session_monitor.check(FakeTable(), [signin(HOME_IP, 1), record], Lookup(), NOW,
+                                        analyze=analyze_ip)[0]
+        related = [{"type": "mfa_change", "severity": "medium", "status": "emailed",
+                    "at": "2026-11-08T11:00:00Z"}]
+        with patch.object(config, "WEBHOOK_FORMAT", fmt), patch("webhook._http") as http, \
+                patch("alerting._send_email", return_value=True) as email:
+            http.post.return_value.status_code = 200
+            assert alerting.send_compromise_alert(finding, related=related)
+        payload = json.loads(http.post.call_args.kwargs["data"])
+        if fmt == "teams":
+            text = payload["attachments"][0]["content"]["body"][1]["inlines"][0]["text"]
+        else:
+            text = payload["text"]
+        body = email.call_args.args[1]
+        for value in ("2026-11-08 11:01:00 UTC", "2026-11-08 11:20:00 UTC", "19 minutes",
+                      "Client=OWA;Action=ViaProxy", "resource-app", "client-app", "api-app",
+                      "No matching sign-in from this exact IP", "7-day history"):
+            assert value in text and value in body
+        assert "Other alerts for this user in the last 24 hours: 1" in text
+        assert alerting.short_title("mfa_change") in text
+        assert "Outlook &lt;test&gt;" in body
+        assert ("Outlook &lt;test&gt;" if fmt == "slack" else "Outlook <test>") in text
+        assert "without a new sign-in" not in text and "Session first seen" not in text
+
     def test_both_sends_email_and_webhook(self, hook):
         with patch("webhook._http") as http, patch("alerting._send_email", return_value=True) as email:
             http.post.return_value = MagicMock(status_code=200)
