@@ -192,10 +192,12 @@ Subject: `[M365 Alert] HIGH: Sign-in from new country <CC> - <user>, <result>`.
 
 Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used from a second country or a risky IP".
 
-**What it means.** One Entra session (one session ID) was used from one country, then from another. Or the session started on a normal network, and then a mailbox record in the same country came from a VPN, proxy, hosting, or Tor IP. That IP did not sign in as the user. The session token was used without a new sign-in. The usual cause is a stolen session cookie (AiTM phishing) or a stolen token (infostealer).
+**What it means.** One Entra session (one session ID) appeared from two countries. Or the session started on a normal network, and then a mailbox record in the same country came from a VPN, proxy, hosting, or Tor IP. For the same-country alert, the monitor found no matching sign-in from that exact IP in its seven-day history. This does not prove that no sign-in occurred. A network change, a service acting for the user, or a stolen session cookie or token can cause this. A hosting classification alone does not establish token theft. The IP score is not a probability of account compromise.
 
 **How to check it is real.**
-- The first sentence names both IPs and the second network. For two countries, it also names both countries and the minutes between them. The notice says where the session started.
+- The summary names both IPs and the second network. The network text includes the provider, organisation, ASN, score, and estimated location when the IP lookup supplies them. An organisation name can be an old allocation label.
+- Details shows both observation times in UTC and the minutes between them. It also shows the current record's client or protocol, user agent, app ID, client app ID, and API ID when present. Old session rows can have no time for the previous IP. In that case, the alert says "time unavailable" and omits the elapsed time.
+- Email and webhook alerts include these details. Email lists related alerts from the journal. Webhooks give their count and types. An empty related-alert section does not prove that the account is safe.
 - Fields: `Operation` (for example `UserLoggedIn` or `MailItemsAccessed`), `ClientIP` or `ClientIPAddress`, `DeviceProperties` (`SessionId`), `SessionId`, `AppAccessContext` (`AADSessionId`), `ClientInfoString`.
 - Compare: Is the second network a hosting or VPN provider? Is the time between the countries shorter than travel needs? Did the user change networks?
 - Ask the user where they are, and if they use a VPN.
@@ -203,6 +205,8 @@ Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used
 - Look for mail that the user got just before the first sign-in. An AiTM phishing link often arrives by email.
 
 **Common benign causes.** The user turned a VPN on or off while the browser was open. A company proxy or web gateway with exits in other countries. Travel. Wrong geolocation on a mobile network.
+
+The session and mail-access checks skip recognized Microsoft service relays. A Copilot REST mail-read record that identifies the Copilot backend in both its app and API fields is skipped without a Graph lookup. This hides the backend's IP movement, because it does not locate the user. Sign-ins and direct client access still count. The exclusion does not confirm that the account's other activity is authorized.
 
 **If real.** [Contain the account](#contain-an-account). Revoke sessions. Issued access tokens can stay valid while the change applies. Find the phishing email. Use **Exchange admin center > Mail flow > Message trace** to find other recipients.
 

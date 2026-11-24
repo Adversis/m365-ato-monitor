@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-labelledby="owl-title">
+  <title id="owl-title">M365 ATO Monitor owl — muted teal and coral</title>
+  <path fill="#2D595B" fill-rule="evenodd" d="M35 39 70 53Q100 34 130 53L165 39 154 116Q143 155 100 177 57 155 46 116ZM98 94A24 24 0 1 0 50 94 24 24 0 1 0 98 94ZM150 94A24 24 0 1 0 102 94 24 24 0 1 0 150 94Z"/>
+  <circle fill="#F7F5EF" cx="74" cy="94" r="24"/>
+  <circle fill="#F7F5EF" cx="126" cy="94" r="24"/>
+  <circle fill="#2D595B" cx="77" cy="95" r="9"/>
+  <circle fill="#2D595B" cx="123" cy="95" r="9"/>
+  <path fill="#D49183" d="M100 110 111 122 100 139 89 122Z"/>
+  <path fill="#7FA7A1" d="m86 150 14 7 14-7-14 15Z"/>
+</svg>

@@ -44,7 +44,7 @@ from azure.core.exceptions import ResourceNotFoundError
 
 import config
 import geo_monitor
-from mail_access import service_ip_client
+from mail_access import SIGNIN_DAYS, service_ip_client
 from ip_checker import extract_ip, is_allowed_ip, is_private_ip, network_fields
 
 TABLE_NAME = "signinsessions"
@@ -56,9 +56,10 @@ PENDING_PARTITION = "pending"
 PENDING_DAYS = 7
 PENDING_MAX = 50
 _PENDING_FIELDS = ("type", "severity", "user", "description", "ip", "session_id", "country", "mark", "ip_context",
-                   "asn", "network")
+                   "asn", "network", "session_context")
 _EVENT_FIELDS = ("Id", "CreationTime", "Operation", "UserId", "ClientIP", "ClientIPAddress", "Workload",
-                 "RecordType", "ResultStatus", "UserAgent", "ApplicationId", "MailboxOwnerUPN", "SessionId")
+                 "RecordType", "ResultStatus", "UserAgent", "ApplicationId", "MailboxOwnerUPN", "SessionId",
+                 "ClientInfoString", "AppId", "ClientAppId", "AppAccessContext")
 RETENTION_DAYS = 30
 MAX_IPS = 25
 NETWORK_MARK = "risky-network"  # in "alerted": the session already had a same-country risky-IP finding
@@ -133,6 +134,7 @@ def _load(table, sid: str) -> dict:
     return {
         "user": entity.get("user", ""),
         "ips": ips,
+        "ip_times": json.loads(entity.get("ip_times") or "{}"),
         "countries": json.loads(entity.get("countries") or "{}"),
         "alerted": json.loads(entity.get("alerted") or "[]"),
         "risky": json.loads(entity.get("risky") or "[]"),
@@ -149,6 +151,7 @@ def _save(table, sid: str, row: dict, now: datetime) -> None:
         "PartitionKey": PARTITION, "RowKey": sid, "user": row["user"],
         "ip_schema": 2,
         "ips": json.dumps(ips), "countries": json.dumps(row["countries"]),
+        "ip_times": json.dumps({ip: t for ip, t in row.get("ip_times", {}).items() if ip in ips}),
         "alerted": json.dumps(row["alerted"]), "risky": json.dumps(risky),
         "first_seen": row.get("first_seen") or now.isoformat(),
         "last_seen": now.isoformat(),
@@ -195,6 +198,7 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
         if not row.get("user"):
             row["user"] = user
         row.setdefault("ips", {})
+        row.setdefault("ip_times", {})
         row.setdefault("countries", {})
         row.setdefault("alerted", [])
         row.setdefault("risky", [])
@@ -217,6 +221,13 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
                 row["risky"].append(ip)
                 if normal:
                     moved = (normal, analysis)
+        # Presentation only: keep the actual event time for each IP. Older rows have no
+        # per-IP time; do not substitute the processing time or another IP's country time.
+        observed = _utc_time(_time(record))
+        previous_time = _utc_time(row["ip_times"].get(ip, ""))
+        if observed and (not previous_time or observed > previous_time):
+            row["ip_times"][ip] = observed.isoformat()
+            changed.add(sid)
         countries = row["countries"]
         if cc in countries:
             if when > countries[cc]["last"]:
@@ -227,7 +238,7 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
                     and not known(row["user"] or user, ip)):
                 moved_sessions.add(sid)
                 findings.append(_network_finding(sid, row["user"] or user, ip, cc, moved[0], moved[1],
-                                                 results.get(ip) or {}, record))
+                                                 results.get(ip) or {}, record, row["ip_times"]))
             continue
         others = sorted(countries.items(), key=lambda kv: kv[1]["last"])
         countries[cc] = {"first": when, "last": when, "ip": ip}
@@ -238,7 +249,7 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
         prev_cc, prev = others[-1]
         data = results.get(ip) or {}
         usual = _usual(geo_table, row["user"] or user, cc, now)
-        gap = _minutes_between(prev["last"], when)
+        gap = _minutes_between(row["ip_times"].get(prev["ip"], ""), _time(record))
         gap_text = f" {gap} minutes later" if gap is not None and gap >= 0 else ""
         org = _network_text(data)
         findings.append({
@@ -247,7 +258,8 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
             "user": row["user"] or user,
             "description": (
                 f"Session {sid[:8]} was used from {prev_cc} (IP {prev['ip']}) and then from {cc} "
-                f"(IP {ip}, {org}){gap_text}. A stolen session cookie or token is the usual cause. "
+                f"(IP {ip}, {org}){gap_text}. A network change, a service acting for the user, or a stolen "
+                f"session cookie or token can cause this. "
                 f"Operation: {record.get('Operation', 'unknown')}."
             ),
             "ip": ip,
@@ -255,8 +267,8 @@ def check(table, records: list, lookup: Callable[[list], dict], now: datetime, g
             "session_id": sid,
             "country": cc,
             "mark": cc,
-            "ip_context": f"Session first seen in {_first_country(countries, cc)}; now in {cc} ({org})"
-                          + ("; this country is usual for the user" if usual else ""),
+            "ip_context": "This country is usual for the user" if usual else "",
+            "session_context": _session_context(prev["ip"], ip, row["ip_times"], record),
             **network_fields(data),
         })
 
@@ -335,7 +347,7 @@ def _normal_ip(row: dict) -> str:
 
 
 def _network_finding(sid: str, user: str, ip: str, cc: str, normal: str, analysis: dict, data: dict,
-                     record: dict) -> dict:
+                     record: dict, ip_times: dict) -> dict:
     """A session that started on a normal network and moved to a risky IP in the same country."""
     kind = analysis.get("proxy_type") or ", ".join(analysis.get("flags") or []) or "suspicious"
     org = _network_text(data)
@@ -344,9 +356,9 @@ def _network_finding(sid: str, user: str, ip: str, cc: str, normal: str, analysi
         "severity": "high" if analysis.get("confidence") == "high" else "medium",
         "user": user,
         "description": (
-            f"Session {sid[:8]} was used from IP {normal} and then from {ip}, a {kind} IP ({org}), in the "
-            f"same country ({cc}). This IP did not sign in as the user: the session token was used without a "
-            f"new sign-in. A stolen token is a possible cause. A user who turned on a VPN also causes this. "
+            f"Session {sid[:8]} appeared from IP {normal} and then from {ip} in the same country ({cc}). "
+            f"proxycheck.io classifies the later IP as {kind} ({org}). "
+            f"A network change, a service acting for the user, or a stolen token can cause this. "
             f"Operation: {record.get('Operation', 'unknown')}."
         ),
         "ip": ip,
@@ -354,19 +366,55 @@ def _network_finding(sid: str, user: str, ip: str, cc: str, normal: str, analysi
         "session_id": sid,
         "country": cc,
         "mark": NETWORK_MARK,
-        "ip_context": f"Session first seen from {normal}; now from a {kind} IP in {cc} ({org})",
+        "ip_context": f"No matching sign-in from this exact IP was found in the monitor's {SIGNIN_DAYS}-day "
+                      "history. This does not prove that no sign-in occurred",
+        "session_context": _session_context(normal, ip, ip_times, record),
         **network_fields(data),
     }
 
 
 def _network_text(data: dict) -> str:
-    """The network, risk score, and place of an IP: "Microsoft Corporation, risk 33/100, Ashburn, Virginia"."""
-    parts = [data.get("organisation") or data.get("provider") or "unknown network"]
+    """Keep the provider as well as the organisation (which can be an old allocation name)."""
+    parts = list(dict.fromkeys(str(data[k])[:100] for k in ("provider", "organisation", "asn")
+                               if data.get(k) and data[k] != "Unknown")) or ["unknown network"]
     risk = data.get("risk")
     if risk not in (None, ""):
-        parts.append(f"risk {risk}/100")
-    parts += [str(data[k]) for k in ("city", "region") if data.get(k) and data.get(k) != "Unknown"]
+        parts.append(f"score {risk}/100")
+    place = ", ".join(str(data[k])[:100] for k in ("city", "region") if data.get(k) and data[k] != "Unknown")
+    if place:
+        parts.append(f"estimated location: {place}")
     return ", ".join(parts)
+
+
+def _utc_time(value: str) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _session_context(previous_ip: str, ip: str, ip_times: dict, record: dict) -> list:
+    """Bounded, plain-text facts shared by email and webhook; no extra API calls."""
+    facts = []
+    for label, address, value in (("Previous observation", previous_ip, ip_times.get(previous_ip, "")),
+                                  ("Current observation", ip, _time(record))):
+        dt = _utc_time(value)
+        stamp = dt.strftime("%Y-%m-%d %H:%M:%S UTC") if dt else "time unavailable"
+        facts.append((label, f"{address} at {stamp}"))
+    gap = _minutes_between(ip_times.get(previous_ip, ""), _time(record))
+    if gap is not None and gap >= 0:
+        facts.append(("Elapsed", f"{gap} minutes"))
+    ctx = record.get("AppAccessContext")
+    ctx = ctx if isinstance(ctx, dict) else {}
+    for label, value in (("Client / protocol", record.get("ClientInfoString")),
+                         ("User agent", record.get("UserAgent")),
+                         ("App ID", record.get("AppId") or record.get("ApplicationId")),
+                         ("Client app ID", record.get("ClientAppId") or ctx.get("ClientAppId")),
+                         ("API ID", ctx.get("APIId"))):
+        if value:
+            facts.append((label, str(value)[:160]))
+    return facts
 
 
 def mark_alerted(table, sid: str, cc: str, now: datetime) -> None:
@@ -379,11 +427,6 @@ def mark_alerted(table, sid: str, cc: str, now: datetime) -> None:
         row["alerted"].append(cc)
         _save(table, sid, row, now)
     _delete_pending(table, f"{sid}|{cc}")
-
-
-def _first_country(countries: dict, exclude: str) -> str:
-    items = sorted(((v["first"], k) for k, v in countries.items() if k != exclude))
-    return items[0][1] if items else "unknown"
 
 
 def _minutes_between(a: str, b: str) -> Optional[int]:

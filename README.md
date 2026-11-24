@@ -1,3 +1,5 @@
+<img src="docs/images/logo.svg" alt="M365 ATO Monitor owl logo" width="112" height="112" align="right">
+
 # M365 ATO Monitor
 
 [![CI](https://github.com/Adversis/m365-ato-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/Adversis/m365-ato-monitor/actions/workflows/ci.yml)
