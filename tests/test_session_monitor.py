@@ -20,6 +20,14 @@ NOW = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
 # Public-looking test addresses (Python treats documentation ranges as private).
 HOME_IP, ABROAD_IP, MS_IP, HOME_IP2 = "81.2.69.1", "45.33.1.2", "52.123.162.160", "81.2.69.99"
 VPN_IP, VPN_IP2, TOR_IP = "193.27.14.9", "193.27.14.10", "185.220.101.4"
+MAIL_RELAY_APIS = [
+    pytest.param("fb8d773d-7ef8-4ec0-a117-179f88add510", id="copilot"),
+    pytest.param("d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0", id="hxservice"),
+    pytest.param("66a88757-258c-4c72-893c-3e8bed4d6899", id="query-formulation"),
+    pytest.param("cc15fd57-2c6c-4117-a88c-83b1d56b4bbe", id="teams-services"),
+    pytest.param("c35cb2ba-f88b-4d15-aa9d-37bd443522e1", id="groups-rest"),
+    pytest.param("20a11fe0-faa8-4df5-baf2-f965f8f9972e", id="contacts-inferencing"),
+]
 DATA = {
     HOME_IP: {"isocode": "US", "asn": "AS7922", "organisation": "Comcast"},
     HOME_IP2: {"isocode": "US", "asn": "AS7922", "organisation": "Comcast"},
@@ -166,8 +174,7 @@ class TestCheck:
 
     @pytest.mark.parametrize("country", ["US", "NL"])
     @pytest.mark.parametrize("nested_client", [False, True])
-    @pytest.mark.parametrize("api", ["fb8d773d-7ef8-4ec0-a117-179f88add510",
-                                     "d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0"])
+    @pytest.mark.parametrize("api", MAIL_RELAY_APIS)
     def test_known_mail_relay_skips_backend_ip_without_graph(self, country, nested_client, api):
         from ip_checker import analyze_ip
         import mail_access as ma
@@ -197,14 +204,14 @@ class TestCheck:
             assert lookup.calls == [[HOME_IP]]
             assert sm.observations([record]) == []
 
-    @pytest.mark.parametrize("api", ["fb8d773d-7ef8-4ec0-a117-179f88add510",
-                                     "d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0"])
+    @pytest.mark.parametrize("api", MAIL_RELAY_APIS)
     @pytest.mark.parametrize("changes,context", [
         ({"AppId": "00000002-0000-0ff1-ce00-000000000000"},
          {"APIId": "00000002-0000-0ff1-ce00-000000000000"}),  # direct Exchange access
         ({"AppId": "bbbbbbbb-1111-4222-8333-000000000000"},
          {"APIId": "bbbbbbbb-1111-4222-8333-000000000000"}),  # an unknown relay
         ({"AppId": ""}, {}),
+        ({"AppId": "bbbbbbbb-1111-4222-8333-000000000000"}, {}),  # app and API differ
         ({}, {"APIId": ""}),
         ({"ClientAppId": "relay-api"}, {}),  # no relay
         ({"ClientAppId": ""}, {"ClientAppId": ""}),

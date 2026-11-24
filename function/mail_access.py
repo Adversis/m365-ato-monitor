@@ -68,17 +68,23 @@ _GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 # APIs that a client with a user's token can call directly. A record whose token was for another API
 # (APIId) was written by the service of that API, which called Exchange for the user.
 _DIRECT_APIS = frozenset({_GRAPH_API_ID, "00000002-0000-0ff1-ce00-000000000000"})   # Graph, Exchange
-# Microsoft documents these backend app IDs:
+# Microsoft documents these app IDs:
 # Copilot:
 # https://learn.microsoft.com/en-us/graph/api/aiInteractionHistory-getAllEnterpriseInteractions
-# HxService (first-party app list):
+# HxService, GroupsRemoteApiRestClient, ContactsInferencingEmailProcessor:
 # https://learn.microsoft.com/en-us/connectors/custom-connectors/auth-script
+# QueryFormulationService, Microsoft Teams Services:
+# https://learn.microsoft.com/en-us/power-platform/admin/apps-to-allow
 # A first-party app need not have a service principal in the customer's tenant, so
 # Graph ownership lookup alone can miss it. Use this only for the REST mail-read
 # relay shape below, never for sign-ins or as a general client-app allowlist.
 _MAIL_RELAY_APIS = frozenset({
     "fb8d773d-7ef8-4ec0-a117-179f88add510",  # Copilot
     "d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0",  # HxService
+    "66a88757-258c-4c72-893c-3e8bed4d6899",  # QueryFormulationService
+    "cc15fd57-2c6c-4117-a88c-83b1d56b4bbe",  # Microsoft Teams Services
+    "c35cb2ba-f88b-4d15-aa9d-37bd443522e1",  # GroupsRemoteApiRestClient
+    "20a11fe0-faa8-4df5-baf2-f965f8f9972e",  # ContactsInferencingEmailProcessor
 })
 MAX_SUBJECTS = 3
 

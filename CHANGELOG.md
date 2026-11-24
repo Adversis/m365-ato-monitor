@@ -5,6 +5,7 @@ The changes in each release. Versions follow `function/version.py`. The release 
 ## Unreleased
 
 - Skip HxService backend REST mail reads with the same narrow relay checks as Copilot. This removes backend-IP session alerts when Graph ownership lookup is unavailable. Sign-ins and direct client access still count.
+- Apply the same REST mail-read relay checks to QueryFormulationService, Microsoft Teams Services, GroupsRemoteApiRestClient, and ContactsInferencingEmailProcessor. An app ID alone does not exclude a record.
 
 ## 1.1.1 (2026-11-24)
 

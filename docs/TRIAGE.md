@@ -206,7 +206,7 @@ Subject: `[M365 Alert] HIGH: Session reuse - <user>`. Email title: "Session used
 
 **Common benign causes.** The user turned a VPN on or off while the browser was open. A company proxy or web gateway with exits in other countries. Travel. Wrong geolocation on a mobile network.
 
-The session and mail-access checks skip recognized Microsoft service relays. A REST mail-read record that identifies the Copilot backend or HxService in both its app and API fields, with a different, nonempty client app ID, is skipped without a Graph lookup. This hides the backend's IP movement, because it does not locate the user. Sign-ins and direct client access still count. The exclusion does not confirm that the account's other activity is authorized.
+The session and mail-access checks skip recognized Microsoft service relays. A REST mail-read record that identifies the same [catalogued backend](ARCHITECTURE.md#session-check) in both its app and API fields, with a different, nonempty client app ID, is skipped without a Graph lookup. The catalogue covers Copilot, HxService, QueryFormulationService, Microsoft Teams Services, GroupsRemoteApiRestClient, and ContactsInferencingEmailProcessor. This hides the backend's IP movement, because it does not locate the user. Sign-ins and direct client access still count. The exclusion does not confirm that the account's other activity is authorized.
 
 **If real.** [Contain the account](#contain-an-account). Revoke sessions. Issued access tokens can stay valid while the change applies. Find the phishing email. Use **Exchange admin center > Mail flow > Message trace** to find other recipients.
 
