@@ -156,10 +156,9 @@ class TestCheck:
         assert len(findings) == expected_findings
 
     @staticmethod
-    def _copilot_mail_read():
+    def _relay_mail_read(api):
         # Public Microsoft app IDs; no customer identifiers or message contents.
         record = mail_access(VPN_IP, 20)
-        api = "fb8d773d-7ef8-4ec0-a117-179f88add510"
         client = "27922004-5251-4030-b22d-91ecd9a37ea4"
         record.update(Workload="Exchange", ClientInfoString="Client=REST;;", AppId=api, ClientAppId=client)
         record["AppAccessContext"].update(APIId=api, ClientAppId=client)
@@ -167,10 +166,12 @@ class TestCheck:
 
     @pytest.mark.parametrize("country", ["US", "NL"])
     @pytest.mark.parametrize("nested_client", [False, True])
-    def test_copilot_mail_read_skips_backend_ip_without_graph(self, country, nested_client):
+    @pytest.mark.parametrize("api", ["fb8d773d-7ef8-4ec0-a117-179f88add510",
+                                     "d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0"])
+    def test_known_mail_relay_skips_backend_ip_without_graph(self, country, nested_client, api):
         from ip_checker import analyze_ip
         import mail_access as ma
-        record = self._copilot_mail_read()
+        record = self._relay_mail_read(api)
         if nested_client:
             record.pop("ClientAppId")
         lookup = Lookup(dict(DATA, **{VPN_IP: dict(DATA[VPN_IP], isocode=country)}))
@@ -181,6 +182,23 @@ class TestCheck:
         assert lookup.calls == [[HOME_IP]]  # no reputation lookup spent on the backend
         assert ma.count([record])["reads"] == 1  # mail-access reporting still counts it
 
+    def test_hxservice_android_ipv6_backend_does_not_seed_or_move_session(self):
+        from ip_checker import analyze_ip
+        import mail_access as ma
+        api = "d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0"
+        backend_ip = "2603:1036:903:27::99"  # synthetic host in Azure-overlapping server space
+        record = self._relay_mail_read(api)
+        record.update(ClientIPAddress=backend_ip, ClientIP=backend_ip,
+                      ActorInfoString=f"Client=REST;HxService/Android/test[AppId={api}];")
+        with patch("service_actors.app_owner_tenant", return_value=None):
+            assert ma.service_ip_client(record)
+            lookup = Lookup()
+            assert sm.check(FakeTable(), [signin(HOME_IP, 1), record], lookup, NOW, analyze=analyze_ip) == []
+            assert lookup.calls == [[HOME_IP]]
+            assert sm.observations([record]) == []
+
+    @pytest.mark.parametrize("api", ["fb8d773d-7ef8-4ec0-a117-179f88add510",
+                                     "d9b8ec3a-1e4e-4e08-b3c2-5baf00c0fcb0"])
     @pytest.mark.parametrize("changes,context", [
         ({"AppId": "00000002-0000-0ff1-ce00-000000000000"},
          {"APIId": "00000002-0000-0ff1-ce00-000000000000"}),  # direct Exchange access
@@ -188,7 +206,7 @@ class TestCheck:
          {"APIId": "bbbbbbbb-1111-4222-8333-000000000000"}),  # an unknown relay
         ({"AppId": ""}, {}),
         ({}, {"APIId": ""}),
-        ({"ClientAppId": "fb8d773d-7ef8-4ec0-a117-179f88add510"}, {}),  # no relay
+        ({"ClientAppId": "relay-api"}, {}),  # no relay
         ({"ClientAppId": ""}, {"ClientAppId": ""}),
         ({"ClientInfoString": "Client=OWA"}, {}),
         ({"Workload": "SharePoint"}, {}),
@@ -196,11 +214,11 @@ class TestCheck:
         ({"Operation": "UserLoginFailed"}, {}),
         ({"Operation": "Send"}, {}),  # this fallback covers observed mail reads only
     ])
-    def test_copilot_id_alone_does_not_exempt_client_activity(self, changes, context):
+    def test_known_relay_id_alone_does_not_exempt_client_activity(self, changes, context, api):
         from ip_checker import analyze_ip
         import mail_access as ma
-        record = self._copilot_mail_read()
-        record.update(changes)
+        record = self._relay_mail_read(api)
+        record.update({k: api if v == "relay-api" else v for k, v in changes.items()})
         record["AppAccessContext"].update(context)
         with patch("service_actors.app_owner_tenant", return_value=None):
             assert not ma.service_ip_client(record)
